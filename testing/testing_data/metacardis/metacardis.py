@@ -1,7 +1,6 @@
 import sys
 sys.path.append("/data/projects/deepintegromics/analyses/3.tabpfn/final_workspace/metagen_pfn_master")
 import torch
-from testing.data_attention.pasolli.pasolli import open_pasolli
 from meta_learning.meta_training.train import reduce_features
 import os
 import pandas as pd
