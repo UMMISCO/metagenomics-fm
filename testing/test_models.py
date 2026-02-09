@@ -200,14 +200,14 @@ if __name__ == '__main__':
             X, y = open_pasolli(dataset)
             th_abundance = 0.01
 
-        elif "metacardis" in dataset:
-            print(dataset)
-            X, y = open_metacardis(dataset)
-            th_abundance = 0.00001
-
-        elif "openml_" in dataset:
-            print(f"\n[OpenML] {dataset}")
-            X, y = open_openml(dataset)
+        # elif "metacardis" in dataset:
+        #     print(dataset)
+        #     X, y = open_metacardis(dataset)
+        #     th_abundance = 0.00001
+        #
+        # elif "openml_" in dataset:
+        #     print(f"\n[OpenML] {dataset}")
+        #     X, y = open_openml(dataset)
 
         for epoch in epochs:
             print('Results for epoch: ', epoch)

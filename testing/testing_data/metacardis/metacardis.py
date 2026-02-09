@@ -9,7 +9,7 @@ import pdb
 
 
 def open_metacardis(name):
-    file_path = f"/data/projects/deepintegromics/analyses/3.tabpfn/final_workspace/metagen_pfn_master/testing/data_attention/metacardis/{name}.csv"
+    # file_path = f"/data/projects/deepintegromics/analyses/3.tabpfn/final_workspace/metagen_pfn_master/testing/data_attention/metacardis/{name}.csv"
     df = pd.read_csv(file_path)
 
     if not 'label' in df.columns:

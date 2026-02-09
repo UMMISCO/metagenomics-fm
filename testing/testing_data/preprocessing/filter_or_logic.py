@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/data/projects/deepintegromics/analyses/3.tabpfn/final_workspace/metagen_pfn_master")
+# sys.path.append("/data/projects/deepintegromics/analyses/3.tabpfn/final_workspace/metagen_pfn_master")
 import torch
 import os
 import pandas as pd
