@@ -2,7 +2,7 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$" />
-    <orderEntry type="jdk" jdkName="Python 3.12 (DeepMicro)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Remote Python 3.11.7 (sftp://gperciballi@hpc-cng4.ummisco.ioit:22/home/gperciballi/.conda/envs/lab/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
