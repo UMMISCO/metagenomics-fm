@@ -18,8 +18,8 @@ from huggingface_hub import hf_hub_download
 from huggingface_hub.utils import LocalEntryNotFoundError
 
 from .preprocessing import TransformToNumerical, EnsembleGenerator
-from tabicl_original import InferenceConfig
-from tabicl_original import TabICL
+from tabicl_original.model.inference_config import InferenceConfig
+from tabicl_original.model.tabicl import TabICL
 
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")

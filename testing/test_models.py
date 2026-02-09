@@ -1,7 +1,7 @@
 import os
 import sys
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
-# sys.path.append('/lustre/fswork/projects/rech/hyd/uzt44fk/Tab_ICL/tabicl/src')
+# sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/testing')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Union
 
@@ -14,10 +14,10 @@ from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.feature_selection import SelectKBest, f_classif
 
-from testing.testing_data.pasolli.pasolli import open_pasolli
+from testing_data.pasolli.pasolli import open_pasolli
 # from testing_data.open_ml.open_ml_dataset import open_openml
-from testing.testing_data.metacardis.metacardis import open_metacardis
-from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
+# from testing_data.metacardis.metacardis import open_metacardis
+from testing_data.preprocessing.filter_or_logic import open_and_filter
 
 from foundation_models.src.tabicl_original.sklearn.classifier import TabICLClassifier
 from sap_rpt_oss import SAP_RPT_OSS_Classifier
@@ -40,8 +40,8 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
     elif model_name == 'tabicl':
         # clf = TabICLClassifier(n_estimators=32, norm_methods="none",preprocess=False, model_path="/data/projects/deepintegromics/analyses/3.tabpfn/tab_icl/tabicl/src/tabicl/checkpoints/checkpoints_tabicl_our_prior_mixed/step-2750.ckpt", allow_auto_download=False)
         # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, model_path="/lustre/fswork/projects/rech/hyd/uzt44fk/Tab_ICL/tabicl/src/tabicl/checkpoints/checkpoints_tabicl_our_prior_bnn_noPP/step-1750.ckpt", allow_auto_download=False)
-        clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"],preprocess=True, model_path="/data/projects/deepintegromics/analyses/3.tabpfn/tab_icl/tabicl/src/tabicl_original/checkpoints/checkpoints_tabicl_similarity/step-2500.ckpt", allow_auto_download=False)
-        # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, checkpoint_version="tabicl-classifier-v1.1-0506.ckpt")
+        # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"],preprocess=True, model_path="/data/projects/deepintegromics/analyses/3.tabpfn/tab_icl/tabicl/src/tabicl_original/checkpoints/checkpoints_tabicl_similarity/step-2500.ckpt", allow_auto_download=False)
+        clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, checkpoint_version="tabicl-classifier-v1.1-0506.ckpt")
         print("we are using TabICL model")
     return clf
 
