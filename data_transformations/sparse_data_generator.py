@@ -7,10 +7,9 @@ from openTSNE import TSNE
 from lets_plot import *
 from typing import Tuple, Optional, List
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/tab_icl/tabicl/tests')
-from testing_data.pasolli.pasolli import open_pasolli
-from testing_data.metacardis.metacardis import open_metacardis
-from testing_data.preprocessing.filter_or_logic import open_and_filter
+from testing.testing_data.pasolli.pasolli import open_pasolli
+from testing.testing_data.metacardis.metacardis import open_metacardis
+from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
 
 
 class DataGenerator:
