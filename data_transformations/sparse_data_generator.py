@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from openTSNE import TSNE
 from lets_plot import *
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/tab_icl/tabicl/tests')
 from testing_data.pasolli.pasolli import open_pasolli
@@ -280,13 +280,13 @@ class DataGenerator:
         # Renormalize non-zero samples
         X_reduced[~zero_samples] = X_reduced[~zero_samples].div(row_sums[~zero_samples], axis=0)
 
-        if verbose:
-            print(f"Original shape: {X.shape}")
-            print(f"New shape: {X_reduced.shape}")
-            if not zero_samples.any():
-                # Verify renormalization
-                new_sums = X_reduced.sum(axis=1)
-                print(f"Row sums after renormalization: min={new_sums.min():.6f}, max={new_sums.max():.6f}")
+        # if verbose:
+        #     print(f"Original shape: {X.shape}")
+        #     print(f"New shape: {X_reduced.shape}")
+        #     if not zero_samples.any():
+        #         # Verify renormalization
+        #         new_sums = X_reduced.sum(axis=1)
+        #         print(f"Row sums after renormalization: min={new_sums.min():.6f}, max={new_sums.max():.6f}")
 
         return X_reduced
 
@@ -437,76 +437,297 @@ class DataGenerator:
 
         return X_augmented
 
-    def _increase_zeros(
+    def _adjust_sparsity(
             self,
             X: pd.DataFrame,
-            gamma: Optional[float] = None,
-            threshold: Optional[float] = None,
+            target_sparsity: Optional[float] = None,
+            noise_range: Optional[Tuple[float, float]] = None,
             verbose: Optional[bool] = None
     ) -> pd.DataFrame:
         """
-        Increase sparsity of compositional data (rows sum to 1)
-        without destroying the per-sample distribution.
+        Adjust sparsity by adding or removing the EXACT number of zeros needed.
 
-        This method:
-        - Preserves relative structure among non-zero dominant features
-        - Removes weak, low-abundance taxa first
-        - Pushes small values toward zero in a realistic compositional way
-
-        Steps:
-        1. Raise each value to power (1 + gamma) — shrinks small values more strongly
-        2. Zero out values below `threshold`
-        3. Renormalize each sample back to sum=1
+        - If current sparsity < target → Add zeros to reach target
+        - If current sparsity > target → Fill zeros to reach target
 
         Parameters
         ----------
         X : pd.DataFrame
             Compositional data where rows sum to 1
-        gamma : float, optional
-            Exponent increase factor (default: 1.5)
-            Higher values → more aggressive sparsification
-        threshold : float, optional
-            Values below this are set to zero (default: 1e-6)
+        target_sparsity : float, optional
+            Desired sparsity level (default: 0.5)
+        noise_range : tuple, optional
+            (min, max) for random noise added to zeros (default: (1e-6, 1e-4))
         verbose : bool, optional
             Print sparsity statistics (default: True)
 
         Returns
         -------
         pd.DataFrame
-            Sparsified compositional data (rows still sum to 1)
+            Adjusted compositional data (rows sum to 1)
+
+        Examples
+        --------
+        # Increase sparsity to 70%
+        X_sparse = gen._adjust_sparsity(X, target_sparsity=0.7)
+
+        # Decrease sparsity to 30%
+        X_dense = gen._adjust_sparsity(X, target_sparsity=0.3)
         """
-        # Get parameters from init or use defaults
-        gamma = gamma if gamma is not None else self.params.get('gamma', 1.5)
-        threshold = threshold if threshold is not None else self.params.get('threshold', 1e-6)
+        # Get parameters
+        target_sparsity = target_sparsity if target_sparsity is not None else self.params.get('target_sparsity', 0.5)
+        noise_range = noise_range if noise_range is not None else self.params.get('noise_range', (1e-6, 1e-4))
         verbose = verbose if verbose is not None else self.params.get('verbose', True)
 
         X = X.copy().astype(float)
-        X_sparse = pd.DataFrame(index=X.index, columns=X.columns)
+        current_sparsity = (X == 0).sum().sum() / X.size
+        total_elements = X.size
 
-        for i in X.index:
-            x = X.loc[i].values
-
-            # Step 1 — shrink small values strongly
-            x_shrunk = x ** (1 + gamma)
-
-            # Step 2 — thresholding to inject zeros
-            x_shrunk[x_shrunk < threshold] = 0.0
-
-            # Step 3 — renormalize (if any nonzero values remain)
-            s = x_shrunk.sum()
-            if s > 0:
-                x_shrunk = x_shrunk / s
-            else:
-                # Extremely sparse sample: fallback to original vector
-                x_shrunk = x
-
-            X_sparse.loc[i] = x_shrunk
+        current_zeros = int(current_sparsity * total_elements)
+        target_zeros = int(target_sparsity * total_elements)
+        zeros_to_adjust = target_zeros - current_zeros
 
         if verbose:
-            print(f"Original sparsity: {(X == 0).mean(axis=1).mean():.4f}")
-            print(f"New sparsity: {(X_sparse == 0).mean(axis=1).mean():.4f}")
+            print("=" * 60)
+            print("EXACT SPARSITY ADJUSTMENT")
+            print("=" * 60)
+            print(f"Current sparsity: {current_sparsity:.4f} ({current_sparsity * 100:.1f}%)")
+            print(f"Target sparsity:  {target_sparsity:.4f} ({target_sparsity * 100:.1f}%)")
+            print(f"Current zeros:    {current_zeros}")
+            print(f"Target zeros:     {target_zeros}")
+            print(f"Zeros to adjust:  {zeros_to_adjust:+d}")
+            print()
 
-        return X_sparse
+        if zeros_to_adjust == 0:
+            if verbose:
+                print("✓ Already at target sparsity")
+            return X
+
+        if zeros_to_adjust > 0:
+            # Need to ADD zeros (sparsify)
+            if verbose:
+                print(f"STRATEGY: Add {zeros_to_adjust} zeros")
+            X_adjusted = self._add_exact_zeros(X, zeros_to_adjust, verbose)
+        else:
+            # Need to REMOVE zeros (densify)
+            if verbose:
+                print(f"STRATEGY: Fill {-zeros_to_adjust} zeros")
+            X_adjusted = self._fill_exact_zeros(X, -zeros_to_adjust, noise_range, verbose)
+
+        # Final statistics
+        final_sparsity = (X_adjusted == 0).sum().sum() / X_adjusted.size
+        final_zeros = int(final_sparsity * total_elements)
+
+        if verbose:
+            print()
+            print("=" * 60)
+            print("FINAL RESULTS")
+            print("=" * 60)
+            print(f"Original sparsity: {current_sparsity:.4f} ({current_zeros} zeros)")
+            print(f"Target sparsity:   {target_sparsity:.4f} ({target_zeros} zeros)")
+            print(f"Final sparsity:    {final_sparsity:.4f} ({final_zeros} zeros)")
+            print(f"Deviation:         {abs(final_zeros - target_zeros)} zeros")
+            print("=" * 60)
+
+        return X_adjusted
+
+    def _add_exact_zeros(
+            self,
+            X: pd.DataFrame,
+            num_zeros_to_add: int,
+            threshold: float = 1e-6,
+            verbose: bool = False
+    ) -> pd.DataFrame:
+        """
+        Add exactly N zeros using power transformation.
+
+        Strategy:
+        1. Use binary search to find the right gamma
+        2. Apply power transformation: x^(1+gamma)
+        3. Set values below fixed threshold (1e-6) to zero
+        4. Adjust gamma until exactly N new zeros are created
+        5. Renormalize
+
+        Parameters
+        ----------
+        X : pd.DataFrame
+            Compositional data
+        num_zeros_to_add : int
+            Exact number of zeros to add
+        threshold : float
+            Fixed threshold below which values become zero (default: 1e-6)
+        verbose : bool
+            Print progress
+
+        Returns
+        -------
+        pd.DataFrame
+            Sparsified data with exactly N more zeros
+        """
+        X_sparse = X.copy()
+
+        # Count current non-zero values
+        non_zero_mask = X_sparse > 0
+        num_non_zero = non_zero_mask.sum().sum()
+        current_zeros = (X_sparse == 0).sum().sum()
+
+        if num_non_zero < num_zeros_to_add:
+            raise ValueError(
+                f"Cannot add {num_zeros_to_add} zeros. "
+                f"Only {num_non_zero} non-zero values available."
+            )
+
+        if verbose:
+            print(f"  Using power transformation to add {num_zeros_to_add} zeros")
+            print(f"  Current zeros: {current_zeros}")
+            print(f"  Non-zero values available: {num_non_zero}")
+            print(f"  Fixed threshold: {threshold:.2e}")
+
+        # Binary search to find the right gamma
+        gamma_min, gamma_max = 0.0, 10.0
+        tolerance = 1  # Allow ±1 zero deviation
+        max_iterations = 50
+
+        best_gamma = None
+        best_X_sparse = None
+        best_diff = float('inf')
+
+        for iteration in range(max_iterations):
+            gamma = (gamma_min + gamma_max) / 2
+
+            # Apply power transformation
+            X_transformed = X_sparse ** (1 + gamma)
+
+            # Apply fixed threshold
+            X_thresholded = X_transformed.copy()
+            X_thresholded[X_thresholded < threshold] = 0.0
+
+            # Count new zeros created
+            new_zeros = (X_thresholded == 0).sum().sum() - current_zeros
+            diff = abs(new_zeros - num_zeros_to_add)
+
+            if verbose and iteration % 10 == 0:
+                print(f"    Iteration {iteration}: gamma={gamma:.3f}, new_zeros={new_zeros}, diff={diff}")
+
+            # Track best result
+            if diff < best_diff:
+                best_diff = diff
+                best_gamma = gamma
+                best_X_sparse = X_thresholded.copy()
+
+            # Check convergence
+            if diff <= tolerance:
+                if verbose:
+                    print(f"  ✓ Found gamma={gamma:.3f} creating {new_zeros} new zeros (target: {num_zeros_to_add})")
+                X_final = X_thresholded
+                break
+
+            # Adjust search range based on result
+            if new_zeros < num_zeros_to_add:
+                # Need higher gamma (more aggressive shrinkage)
+                gamma_min = gamma
+            else:
+                # Need lower gamma (less aggressive shrinkage)
+                gamma_max = gamma
+
+        else:
+            # Max iterations reached, use best result
+            if verbose:
+                print(f"  ⚠ Max iterations reached. Using gamma={best_gamma:.3f}")
+                print(
+                    f"    Created {(best_X_sparse == 0).sum().sum() - current_zeros} new zeros (target: {num_zeros_to_add})")
+            X_final = best_X_sparse
+
+        # Renormalize each row to sum to 1
+        row_sums = X_final.sum(axis=1)
+        zero_rows = row_sums == 0
+
+        if zero_rows.any():
+            if verbose:
+                print(f"  Warning: {zero_rows.sum()} rows became all zeros")
+            X_final[~zero_rows] = X_final[~zero_rows].div(row_sums[~zero_rows], axis=0)
+        else:
+            X_final = X_final.div(row_sums, axis=0)
+
+        if verbose:
+            final_zeros = (X_final == 0).sum().sum()
+            print(f"  Final zero count: {final_zeros} (added {final_zeros - current_zeros})")
+
+        return X_final
+
+    def _fill_exact_zeros(
+            self,
+            X: pd.DataFrame,
+            num_zeros_to_fill: int,
+            noise_range: Tuple[float, float] = (1e-6, 1e-4),
+            verbose: bool = False
+    ) -> pd.DataFrame:
+        """
+        Fill exactly N zeros with small random values.
+
+        Strategy:
+        1. Find all zero positions
+        2. Randomly select N zeros to fill
+        3. Replace them with random noise
+        4. Renormalize each row to sum to 1
+
+        Parameters
+        ----------
+        X : pd.DataFrame
+            Compositional data
+        num_zeros_to_fill : int
+            Exact number of zeros to fill
+        noise_range : tuple
+            (min, max) for random noise
+        verbose : bool
+            Print progress
+
+        Returns
+        -------
+        pd.DataFrame
+            Densified data with exactly N fewer zeros
+        """
+        X_dense = X.copy()
+
+        # Get all zero positions
+        zero_mask = (X_dense == 0)
+        num_total_zeros = zero_mask.sum().sum()
+
+        if num_total_zeros < num_zeros_to_fill:
+            raise ValueError(
+                f"Cannot fill {num_zeros_to_fill} zeros. "
+                f"Only {num_total_zeros} zeros available."
+            )
+
+        # Get positions of all zeros
+        zero_positions = np.argwhere(zero_mask.values)
+
+        # Randomly select which zeros to fill
+        np.random.seed(None)  # Ensure randomness
+        indices_to_fill = np.random.choice(
+            len(zero_positions),
+            size=num_zeros_to_fill,
+            replace=False
+        )
+        selected_positions = zero_positions[indices_to_fill]
+
+        # Generate random noise
+        noise = np.random.uniform(noise_range[0], noise_range[1], size=num_zeros_to_fill)
+
+        if verbose:
+            print(f"  Filling {num_zeros_to_fill} randomly selected zeros")
+            print(f"  Noise range: [{noise_range[0]:.2e}, {noise_range[1]:.2e}]")
+            print(f"  Actual noise: [{noise.min():.2e}, {noise.max():.2e}]")
+
+        # Fill selected zeros
+        for idx, (i, j) in enumerate(selected_positions):
+            X_dense.iloc[i, j] = noise[idx]
+
+        # Renormalize rows to sum to 1
+        row_sums = X_dense.sum(axis=1)
+        X_dense = X_dense.div(row_sums, axis=0)
+
+        return X_dense
 
     def get_stats(self) -> dict:
         """
@@ -597,202 +818,322 @@ class DataGenerator:
                 theme_minimal()
         )
 
-# %% TEST - Using DataGenerator workflow
-# Initialize with dataset
-gen = DataGenerator(
-    generator_type='sparsity',
-    data_source='pasolli',
-    dataset_name='abundance_WT2D',
-    filter_params=(0.0, 0.0),
-    gamma=3,
-    threshold=1e-6,
+#%%
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import Tuple
+
+# --------------------------
+# Normalization
+# --------------------------
+def normalize_rows(df: pd.DataFrame) -> pd.DataFrame:
+    row_sums = df.sum(axis=1)
+    return df.div(row_sums, axis=0)
+
+# --------------------------
+# Heatmap Comparison
+# --------------------------
+def plot_heatmap_comparison(
+        X_original: pd.DataFrame,
+        X_transformed: pd.DataFrame,
+        title_original: str = "Original Data",
+        title_transformed: str = "Transformed Data",
+        figsize: Tuple[int, int] = (16, 6),
+        cmap: str = "YlOrRd",
+        vmin: float = 0
+):
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    # Separate vmax for each heatmap
+    vmax_orig = np.percentile(X_original.values, 99)
+    vmax_trans = np.percentile(X_transformed.values, 99)
+
+    sns.heatmap(
+        X_original.T,
+        ax=axes[0],
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax_orig,
+        cbar_kws={'label': 'Abundance'},
+        xticklabels=False,
+        yticklabels=False
+    )
+    axes[0].set_title(title_original)
+
+    sns.heatmap(
+        X_transformed.T,
+        ax=axes[1],
+        cmap=cmap,
+        vmin=vmin,
+        vmax=vmax_trans,
+        cbar_kws={'label': 'Abundance'},
+        xticklabels=False,
+        yticklabels=False
+    )
+    axes[1].set_title(title_transformed)
+
+    plt.tight_layout()
+    plt.show()
+
+
+
+# ================================================================
+# LOAD ORIGINAL DATA (UNNORMALIZED)
+# ================================================================
+X_original, y = open_pasolli('abundance_cirrhosis--stagediscovery')
+X_original, y = open_and_filter(X_original, 0.0, 0.0)
+
+# Ensure float
+X_original = X_original.astype(float)
+
+print(f"Original data shape: {X_original.shape}")
+print(f"Original sparsity: {(X_original == 0).sum().sum() / X_original.size:.2%}")
+print("Example original row sums:", X_original.sum(axis=1).head())
+print("=" * 60)
+
+# Normalized version for FAIR COMPARISON
+X_norm = normalize_rows(X_original)
+
+
+
+# ================================================================
+# EXAMPLE 1: Remove Features - Random Selection
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 1: Remove Features - Random Selection")
+print("=" * 60)
+
+gen1 = DataGenerator(
+    generator_type='remove_features',
+    k=50,
+    selection_method='random',
+    seed=42,
     verbose=True
 )
 
-# Load and generate in one go
-X, y = gen.load_data()
-X_sparse = gen.generate()
+X_reduced_random = gen1.generate(X_original).astype(float)
+X_reduced_random_norm = normalize_rows(X_reduced_random)
 
-# Get statistics
-stats = gen.get_stats()
-print("\nDataset Statistics:")
-for key, value in stats.items():
-    print(f"  {key}: {value}")
+plot_heatmap_comparison(
+    X_norm,
+    X_reduced_random_norm,
+    title_original="Original Data (Normalized)",
+    title_transformed="After Removing 50 Random Features (Normalized)",
+    figsize=(16, 6)
+)
 
-# TEST - Visualize with t-SNE
-plot = gen.visualize_tsne()
-plot.show()
 
-# %% TEST - Compare multiple datasets
-datasets = [
-    'abundance_cirrhosis--stagediscovery',
-    'abundance_cirrhosis--stagevalidation',
-    'abundance_obesity',
-    'abundance_ibd',
-    'abundance_t2d',
-    'abundance_WT2D'
-]
-for dataset in datasets:
-    gen = DataGenerator(
-        generator_type='sparsity',
-        data_source='pasolli',
-        dataset_name=dataset,
-        gamma=3,
-        threshold=1e-6
-    )
-    gen.load_data()
-    gen.generate()
-    stats = gen.get_stats()
-    print(f"\n{dataset}:")
-    print(f"  Samples: {stats['n_samples']}")
-    print(f"  Features: {stats['n_features']}")
-    print(f"  Sparsity increase: {stats['sparsity_increase']:.4f}")
 
-    plot = gen.visualize_tsne()
-    plot.show()
+# ================================================================
+# EXAMPLE 2: Remove 100 Lowest Abundance Features
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 2: Remove 100 Lowest Abundance Features")
+print("=" * 60)
 
-# %% Experiment: Test all selection methods with proper train/test split
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report
-
-# Load data
-gen = DataGenerator(
+gen2 = DataGenerator(
     generator_type='remove_features',
-    data_source='pasolli',
-    dataset_name='abundance_WT2D',
-    verbose=False
-)
-gen.load_data()
-
-# IMPORTANT: Split data FIRST, before any transformations
-X_train, X_test, y_train, y_test = train_test_split(
-    gen.X_original,
-    gen.y_original,
-    test_size=0.2,  # 80% train, 20% test
-    random_state=42,
-    stratify=gen.y_original  # Maintain class proportions
+    k=100,
+    selection_method='lowest_abundance',
+    seed=42,
+    verbose=True
 )
 
-print(f"Original data shape: {gen.X_original.shape}")
-print(f"Train shape: {X_train.shape}")
-print(f"Test shape: {X_test.shape}")
-print(f"Train class distribution: {y_train.value_counts().to_dict()}")
-print(f"Test class distribution: {y_test.value_counts().to_dict()}")
+X_reduced_low = gen2.generate(X_original).astype(float)
+X_reduced_low_norm = normalize_rows(X_reduced_low)
 
-# Experimental parameters
-k_values = [1, 5, 10, 20, 50]
-selection_methods = [
-    'random',
-    'lowest_abundance',
-    'highest_abundance',
-    'lowest_prevalence',
-    'highest_prevalence'
+plot_heatmap_comparison(
+    X_norm,
+    X_reduced_low_norm,
+    title_original="Original Data (Normalized)",
+    title_transformed="After Removing 100 Lowest Abundance Features (Normalized)",
+    figsize=(16, 6)
+)
+
+
+
+# ================================================================
+# EXAMPLE 3: Increase Sparsity to 85%
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 3: Adjust Sparsity → 85%")
+print("=" * 60)
+
+gen3 = DataGenerator(
+    generator_type='sparsity',
+    target_sparsity=0.85,
+    verbose=True
+)
+
+X_sparse_85 = gen3._adjust_sparsity(X_original).astype(float)
+X_sparse_85_norm = normalize_rows(X_sparse_85)
+
+plot_heatmap_comparison(
+    X_norm,
+    X_sparse_85_norm,
+    title_original=f"Original Data (Normalized)",
+    title_transformed="After Increasing Sparsity to 85% (Normalized)",
+    figsize=(16, 6),
+    cmap="Blues"
+)
+
+
+
+# ================================================================
+# EXAMPLE 4: Decrease Sparsity to 60%
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 4: Adjust Sparsity → 60%")
+print("=" * 60)
+
+gen4 = DataGenerator(
+    generator_type='sparsity',
+    target_sparsity=0.60,
+    noise_range=(1e-7, 1e-5),
+    verbose=True
+)
+
+X_sparse_60 = gen4._adjust_sparsity(X_original).astype(float)
+X_sparse_60_norm = normalize_rows(X_sparse_60)
+
+plot_heatmap_comparison(
+    X_norm,
+    X_sparse_60_norm,
+    title_original="Original Data (Normalized)",
+    title_transformed="After Decreasing Sparsity to 60% (Normalized)",
+    figsize=(16, 6),
+    cmap="Greens"
+)
+
+
+
+# ================================================================
+# EXAMPLE 5: Add Random Features (50)
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 5: Add 50 Random Low-Abundance Features")
+print("=" * 60)
+
+gen5 = DataGenerator(
+    generator_type='add_random_features',
+    k=50,
+    min_abundance=1e-5,
+    max_abundance=1e-4,
+    seed=42,
+    verbose=True
+)
+
+X_aug_50 = gen5.generate(X_original).astype(float)
+X_aug_50_norm = normalize_rows(X_aug_50)
+
+plot_heatmap_comparison(
+    X_norm,
+    X_aug_50_norm,
+    title_original="Original Data (Normalized)",
+    title_transformed="After Adding 50 Random Features (Normalized)",
+    figsize=(16, 6),
+    cmap="Purples"
+)
+
+
+
+# ================================================================
+# EXAMPLE 6: Add Random Features (100)
+# ================================================================
+print("\n" + "=" * 60)
+print("EXAMPLE 6: Add 100 Random Medium-Abundance Features")
+print("=" * 60)
+
+gen6 = DataGenerator(
+    generator_type='add_random_features',
+    k=100,
+    min_abundance=1e-4,
+    max_abundance=1e-3,
+    seed=123,
+    verbose=True
+)
+
+X_aug_100 = gen6.generate(X_original).astype(float)
+X_aug_100_norm = normalize_rows(X_aug_100)
+
+plot_heatmap_comparison(
+    X_norm,
+    X_aug_100_norm,
+    title_original="Original Data (Normalized)",
+    title_transformed="After Adding 100 Random Features (Normalized)",
+    figsize=(16, 6),
+    cmap="Oranges"
+)
+
+
+
+# ================================================================
+# SUMMARY TABLE
+# ================================================================
+print("\n" + "=" * 60)
+print("SUMMARY OF ALL TRANSFORMATIONS")
+print("=" * 60)
+
+transformations = [
+    ("Original (Norm)", X_norm),
+    ("Remove 50 Random", X_reduced_random_norm),
+    ("Remove 100 Low", X_reduced_low_norm),
+    ("Sparsity 85%", X_sparse_85_norm),
+    ("Sparsity 60%", X_sparse_60_norm),
+    ("Add 50 Random", X_aug_50_norm),
+    ("Add 100 Random", X_aug_100_norm),
 ]
 
-# Store results
-results = []
+summary_df = pd.DataFrame([
+    {
+        'Transformation': name,
+        'Rows': data.shape[0],
+        'Features': data.shape[1],
+        'Sparsity': f"{(data == 0).sum().sum() / data.size:.2%}",
+        'Mean Abundance': f"{data.mean().mean():.3e}"
+    }
+    for name, data in transformations
+])
 
-print("\n" + "=" * 80)
-print("Running experiments with proper train/test split...")
-print("=" * 80)
+print(summary_df.to_string(index=False))
 
-for method in selection_methods:
-    print(f"\nTesting method: {method}")
-    print("-" * 80)
 
-    for k in k_values:
-        # CRITICAL: Feature selection based ONLY on training data
-        gen_temp = DataGenerator(
-            generator_type='remove_features',
-            verbose=False
-        )
 
-        # Apply transformation to training data
-        X_train_reduced = gen_temp._remove_features(
-            X_train,
-            k=k,
-            selection_method=method,
-            seed=42
-        )
+# ================================================================
+# COMPARATIVE GRID (optional)
+# ================================================================
+print("\n" + "=" * 60)
+print("Creating comparative visualization...")
+print("=" * 60)
 
-        # Get the features that were kept
-        features_kept = X_train_reduced.columns.tolist()
+fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+axes = axes.flatten()
 
-        # Apply SAME transformation to test data (use same features)
-        X_test_reduced = gen_temp._remove_and_renormalize(
-            X_test,
-            features_to_remove=[f for f in X_test.columns if f not in features_kept],
-            verbose=False
-        )
+# Remove last empty subplot
+fig.delaxes(axes[-1])
 
-        # Calculate statistics
-        train_sparsity = (X_train_reduced == 0).mean().mean()
-        test_sparsity = (X_test_reduced == 0).mean().mean()
-        n_features_remaining = X_train_reduced.shape[1]
+for idx, (name, data) in enumerate(transformations):
+    vmax_val = np.percentile(data.values, 99)
 
-        # Train model on training data only
-        rf = RandomForestClassifier(n_estimators=50, random_state=42, n_jobs=-1)
-        rf.fit(X_train_reduced, y_train)
+    sns.heatmap(
+        data.T,
+        ax=axes[idx],
+        cmap="viridis",
+        vmin=0,
+        vmax=vmax_val,
+        cbar=True,
+        xticklabels=False,
+        yticklabels=False
+    )
 
-        # Evaluate on training data (with CV for robustness)
-        cv_scores = cross_val_score(rf, X_train_reduced, y_train, cv=5)
-        train_accuracy = cv_scores.mean()
-        train_std = cv_scores.std()
+    sparsity = (data == 0).sum().sum() / data.size
+    axes[idx].set_title(
+        f"{name}\n{data.shape[1]} features, Sparsity: {sparsity:.1%}",
+        fontsize=11,
+        fontweight='bold'
+    )
 
-        # Evaluate on held-out test data (TRUE performance)
-        test_predictions = rf.predict(X_test_reduced)
-        test_accuracy = accuracy_score(y_test, test_predictions)
-
-        # Store results
-        results.append({
-            'method': method,
-            'k': k,
-            'n_features_remaining': n_features_remaining,
-            'train_sparsity': train_sparsity,
-            'test_sparsity': test_sparsity,
-            'train_accuracy_mean': train_accuracy,
-            'train_accuracy_std': train_std,
-            'test_accuracy': test_accuracy,
-            'overfitting': train_accuracy - test_accuracy  # Gap indicates overfitting
-        })
-
-        print(f"  k={k:2d}: features={n_features_remaining:4d}, "
-              f"train_acc={train_accuracy:.4f}±{train_std:.4f}, "
-              f"test_acc={test_accuracy:.4f}, "
-              f"gap={train_accuracy - test_accuracy:.4f}")
-
-# Convert to DataFrame
-results_df = pd.DataFrame(results)
-
-print("\n" + "=" * 80)
-print("SUMMARY OF RESULTS")
-print("=" * 80)
-print(results_df.to_string(index=False))
-
-# %% Visualize results with train/test comparison
-from lets_plot import *
-
-# Plot 1: Train vs Test Accuracy
-plot_data = results_df.melt(
-    id_vars=['method', 'k'],
-    value_vars=['train_accuracy_mean', 'test_accuracy'],
-    var_name='dataset',
-    value_name='accuracy'
-)
-
-plot1 = (
-        ggplot(plot_data, aes(x='k', y='accuracy', color='method', linetype='dataset')) +
-        geom_line(size=1) +
-        geom_point(size=2) +
-        labs(title='Train vs Test Performance: Feature Removal',
-             x='Number of features removed (k)',
-             y='Accuracy',
-             color='Selection method',
-             linetype='Dataset') +
-        theme_minimal() +
-        facet_wrap('method', ncol=3)
-)
-plot1.show()
+plt.tight_layout()
+plt.show()
