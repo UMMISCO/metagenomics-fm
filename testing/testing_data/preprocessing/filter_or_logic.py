@@ -13,7 +13,6 @@ def open_and_filter(df, th_presence, th_abundance):
     )
 
     df = df_filtered.iloc[:,2:]
-
     return df, y
 
 def presence_abundance_filter(df, th_presence, th_abundance):

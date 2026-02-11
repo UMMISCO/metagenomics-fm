@@ -97,16 +97,18 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
 
         assert all(X_train.columns == X_test.columns)
 
-        if isinstance(X_train, pd.DataFrame):
-            X_train = X_train.to_numpy()
+        if trained_model_name != 'context_tab':
+            if isinstance(X_train, pd.DataFrame):
+                X_train = X_train.to_numpy()
 
-        if isinstance(X_test, pd.DataFrame):
-            X_test = X_test.to_numpy()
+            if isinstance(X_test, pd.DataFrame):
+                X_test = X_test.to_numpy()
 
         print('Final dimensions: ', X_train.shape, X_test.shape, type(X_train), type(X_test) )
 
         # Train the model
         model = load_tabfn_model(trained_model_name, epoch, device)
+
         model.fit(X_train, y_train)
 
         # Predict
