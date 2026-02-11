@@ -1,23 +1,12 @@
-# %%
-import os
-import sys
 import numpy as np
 import pandas as pd
-from openTSNE import TSNE
-from lets_plot import *
-from typing import Tuple, Optional, List
-
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
-
-from testing.testing_data.pasolli.pasolli import open_pasolli
-from testing.testing_data.metacardis.metacardis import open_metacardis
-from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
+from typing import Optional, Tuple, List, Union
 
 
 class DataGenerator:
     """
     A flexible data generator class for microbiome compositional data.
-    Currently supports sparsity transformation.
+    Currently supports sparsity transformation with feature protection.
     """
 
     # Available dataset names
@@ -52,6 +41,8 @@ class DataGenerator:
             Name of the dataset to load (e.g., 'abundance_WT2D')
         filter_params : tuple of (float, float), optional
             Parameters for open_and_filter (default: (0.0, 0.0))
+        protected_features : list of str, optional
+            Feature names that should NOT be modified during perturbations
         **kwargs : dict
             Additional parameters for specific generators:
             - gamma : float, exponent increase factor for sparsity (default: 1.5)
@@ -62,8 +53,8 @@ class DataGenerator:
         self.data_source = data_source
         self.dataset_name = dataset_name
         self.filter_params = filter_params or (0.0, 0.0)
-        self.protected_features = protected_features or [] 
         self.params = kwargs
+        self.protected_features = protected_features or []
 
         # Store original data
         self.X_original = None
@@ -112,6 +103,245 @@ class DataGenerator:
 
         return X, y
 
+    def discover_informative_features(
+            self,
+            method: str = 'random_forest',
+            n_features: Optional[int] = None,
+            threshold: Optional[float] = None,
+            return_scores: bool = False,
+            verbose: bool = True,
+            **method_kwargs
+    ) -> Union[List[str], Tuple[List[str], pd.Series]]:
+        """
+        Discover informative features using Random Forest or LASSO.
+
+        Parameters
+        ----------
+        method : str
+            Feature selection method:
+            - 'random_forest' or 'rf': Feature importance from Random Forest
+            - 'lasso' or 'l1': L1-regularized logistic regression coefficients
+        n_features : int, optional
+            Number of top features to select
+        threshold : float, optional
+            Importance threshold (alternative to n_features)
+            Features with importance > threshold are selected
+        return_scores : bool
+            If True, return (features, scores) tuple
+        verbose : bool
+            Print detailed information
+        **method_kwargs : dict
+            Additional parameters:
+            - For RF: n_estimators, max_depth, random_state, etc.
+            - For LASSO: C, max_iter, random_state, etc.
+
+        Returns
+        -------
+        features : list of str
+            Names of informative features
+        scores : pd.Series (if return_scores=True)
+            Importance scores for all features
+
+        Examples
+        --------
+        # Get top 20 features by Random Forest
+        informative = gen.discover_informative_features(
+            method='random_forest',
+            n_features=20
+        )
+
+        # Get features above importance threshold with LASSO
+        informative = gen.discover_informative_features(
+            method='lasso',
+            threshold=0.01,
+            C=0.1
+        )
+
+        # Get both features and their scores
+        features, scores = gen.discover_informative_features(
+            method='rf',
+            n_features=15,
+            return_scores=True
+        )
+        """
+        if self.X_original is None or self.y_original is None:
+            raise ValueError("Data must be loaded first. Call load_data().")
+
+        if n_features is None and threshold is None:
+            raise ValueError("Either n_features or threshold must be specified")
+
+        # Normalize method name
+        method = method.lower()
+        if method in ['random_forest', 'rf']:
+            scores = self._importance_random_forest(verbose, **method_kwargs)
+            method_name = 'Random Forest'
+        elif method in ['lasso', 'l1']:
+            scores = self._importance_lasso(verbose, **method_kwargs)
+            method_name = 'LASSO'
+        else:
+            raise ValueError(f"Unknown method: {method}. Use 'random_forest' or 'lasso'")
+
+        # Select features based on n_features or threshold
+        if n_features is not None:
+            selected_features = scores.nlargest(n_features).index.tolist()
+        else:
+            selected_features = scores[scores > threshold].index.tolist()
+
+        if verbose:
+            print(f"\n{'=' * 70}")
+            print(f"INFORMATIVE FEATURES DISCOVERED: {len(selected_features)}")
+            print(f"{'=' * 70}")
+            print(f"Method: {method_name}")
+            if n_features:
+                print(f"Selection: Top {n_features} features")
+            else:
+                print(f"Selection: Threshold > {threshold}")
+
+            print(f"\nTop 10 features:")
+            for i, (feat, score) in enumerate(scores.nlargest(10).items(), 1):
+                feat_display = feat[:50] + '...' if len(feat) > 50 else feat
+                print(f"  {i:2d}. {feat_display:53s} {score:.4f}")
+
+        if return_scores:
+            return selected_features, scores
+        return selected_features
+
+    def _importance_random_forest(
+            self,
+            verbose: bool = True,
+            n_estimators: int = 100,
+            max_depth: Optional[int] = None,
+            min_samples_split: int = 2,
+            min_samples_leaf: int = 1,
+            random_state: int = 42,
+            **rf_kwargs
+    ) -> pd.Series:
+        """Random Forest feature importance."""
+        from sklearn.ensemble import RandomForestClassifier
+
+        if verbose:
+            print(f"Computing Random Forest importance (n_estimators={n_estimators})...")
+
+        rf = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            n_jobs=-1,
+            **rf_kwargs
+        )
+        rf.fit(self.X_original, self.y_original)
+
+        importances = pd.Series(
+            rf.feature_importances_,
+            index=self.X_original.columns
+        ).sort_values(ascending=False)
+
+        return importances
+
+    def _importance_lasso(
+            self,
+            verbose: bool = True,
+            C: float = 1.0,
+            max_iter: int = 1000,
+            random_state: int = 42,
+            **lasso_kwargs
+    ) -> pd.Series:
+        """L1-regularized logistic regression coefficients."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+
+        if verbose:
+            print(f"Computing LASSO importance (C={C})...")
+
+        # Standardize features for LASSO
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(self.X_original)
+
+        lasso = LogisticRegression(
+            penalty='l1',
+            solver='liblinear',
+            C=C,
+            max_iter=max_iter,
+            random_state=random_state,
+            **lasso_kwargs
+        )
+        lasso.fit(X_scaled, self.y_original)
+
+        # Use absolute coefficients as importance
+        if len(np.unique(self.y_original)) == 2:
+            importances = pd.Series(
+                np.abs(lasso.coef_[0]),
+                index=self.X_original.columns
+            ).sort_values(ascending=False)
+        else:
+            # Multi-class: use max absolute coefficient across classes
+            importances = pd.Series(
+                np.abs(lasso.coef_).max(axis=0),
+                index=self.X_original.columns
+            ).sort_values(ascending=False)
+
+        return importances
+
+    def discover_and_protect(
+            self,
+            method: str = 'random_forest',
+            n_features: int = 20,
+            **kwargs
+    ) -> List[str]:
+        """
+        Discover informative features and automatically set them as protected.
+
+        Parameters
+        ----------
+        method : str
+            'random_forest' or 'lasso'
+        n_features : int
+            Number of features to protect
+        **kwargs : dict
+            Additional parameters for the discovery method
+
+        Returns
+        -------
+        list of str
+            Protected feature names
+
+        Examples
+        --------
+        # Discover and protect top 20 features using Random Forest
+        protected = gen.discover_and_protect(
+            method='random_forest',
+            n_features=20,
+            n_estimators=200
+        )
+
+        # Discover and protect using LASSO
+        protected = gen.discover_and_protect(
+            method='lasso',
+            n_features=15,
+            C=0.1
+        )
+        """
+        informative_features = self.discover_informative_features(
+            method=method,
+            n_features=n_features,
+            **kwargs
+        )
+
+        self.protected_features = informative_features
+
+        print(f"\n✅ {len(informative_features)} features marked as PROTECTED")
+        print("These will NOT be modified during perturbations\n")
+
+        return informative_features
+
+    def _get_modifiable_features(self, X: pd.DataFrame) -> List[str]:
+        """Get list of features that can be modified (not protected)."""
+        all_features = X.columns.tolist()
+        modifiable = [f for f in all_features if f not in self.protected_features]
+        return modifiable
+
     def generate(
             self,
             X: Optional[pd.DataFrame] = None,
@@ -138,13 +368,12 @@ class DataGenerator:
             X = self.X_original
 
         if self.generator_type == 'sparsity':
-            self.X_generated = self._increase_zeros(X, **override_params)
+            self.X_generated = self._adjust_sparsity(X, **override_params)
         elif self.generator_type == 'remove_features':
             self.X_generated = self._remove_features(X, **override_params)
         elif self.generator_type == 'add_random_features':
             self.X_generated = self._add_random_features(X, **override_params)
         elif self.generator_type == 'identity':
-            # No transformation
             self.X_generated = X.copy()
         else:
             raise ValueError(f"Unknown generator type: {self.generator_type}")
@@ -158,9 +387,11 @@ class DataGenerator:
             features_to_remove: Optional[List[str]] = None,
             selection_method: str = 'random',
             seed: Optional[int] = None,
-            verbose: Optional[bool] = None) -> pd.DataFrame:
+            verbose: Optional[bool] = None
+    ) -> pd.DataFrame:
         """
         Remove k features from compositional data and renormalize.
+        PROTECTED FEATURES ARE NEVER REMOVED.
 
         This preserves compositionality by removing features and
         renormalizing the remaining features so each sample sums to 1.
@@ -213,36 +444,51 @@ class DataGenerator:
 
         X = X.copy()
 
-        # If specific features provided, use those
+        # Get modifiable features only
+        modifiable_features = self._get_modifiable_features(X)
+
+        if verbose and self.protected_features:
+            print(f"\n🛡️  Protected features: {len(self.protected_features)}")
+            print(f"   Modifiable features: {len(modifiable_features)}")
+
+        # If specific features provided, check they're not protected
         if features_to_remove is not None:
+            protected_in_removal = set(features_to_remove) & set(self.protected_features)
+            if protected_in_removal:
+                raise ValueError(
+                    f"Cannot remove protected features: {protected_in_removal}"
+                )
             return self._remove_and_renormalize(X, features_to_remove, verbose)
 
         # Validate k
-        if k > X.shape[1]:
-            raise ValueError(f"k={k} is larger than number of features ({X.shape[1]})")
+        if k > len(modifiable_features):
+            raise ValueError(
+                f"k={k} is larger than number of modifiable features ({len(modifiable_features)}). "
+                f"{len(self.protected_features)} features are protected."
+            )
 
         # Set seed for reproducibility
         if seed is not None:
             np.random.seed(seed)
 
-        # Select features based on method
+        # Select features based on method (from MODIFIABLE features only)
         if selection_method == 'random':
-            features_to_remove = np.random.choice(X.columns, size=k, replace=False)
+            features_to_remove = np.random.choice(modifiable_features, size=k, replace=False)
 
         elif selection_method == 'lowest_abundance':
-            mean_abundance = X.mean(axis=0)
+            mean_abundance = X[modifiable_features].mean(axis=0)
             features_to_remove = mean_abundance.nsmallest(k).index.tolist()
 
         elif selection_method == 'highest_abundance':
-            mean_abundance = X.mean(axis=0)
+            mean_abundance = X[modifiable_features].mean(axis=0)
             features_to_remove = mean_abundance.nlargest(k).index.tolist()
 
         elif selection_method == 'lowest_prevalence':
-            prevalence = (X > 0).sum(axis=0)  # Count non-zero samples per feature
+            prevalence = (X[modifiable_features] > 0).sum(axis=0)
             features_to_remove = prevalence.nsmallest(k).index.tolist()
 
         elif selection_method == 'highest_prevalence':
-            prevalence = (X > 0).sum(axis=0)
+            prevalence = (X[modifiable_features] > 0).sum(axis=0)
             features_to_remove = prevalence.nlargest(k).index.tolist()
 
         else:
@@ -265,6 +511,9 @@ class DataGenerator:
         if verbose:
             print(f"Removing {len(features_to_remove)} features")
             print(f"Remaining features: {len(features_to_keep)}")
+            if self.protected_features:
+                protected_remaining = len(set(features_to_keep) & set(self.protected_features))
+                print(f"Protected features still present: {protected_remaining}/{len(self.protected_features)}")
 
         # Remove features
         X_reduced = X[features_to_keep].copy()
@@ -282,14 +531,6 @@ class DataGenerator:
 
         # Renormalize non-zero samples
         X_reduced[~zero_samples] = X_reduced[~zero_samples].div(row_sums[~zero_samples], axis=0)
-
-        # if verbose:
-        #     print(f"Original shape: {X.shape}")
-        #     print(f"New shape: {X_reduced.shape}")
-        #     if not zero_samples.any():
-        #         # Verify renormalization
-        #         new_sums = X_reduced.sum(axis=1)
-        #         print(f"Row sums after renormalization: min={new_sums.min():.6f}, max={new_sums.max():.6f}")
 
         return X_reduced
 
@@ -543,6 +784,7 @@ class DataGenerator:
     ) -> pd.DataFrame:
         """
         Add exactly N zeros using power transformation.
+        PROTECTED FEATURES ARE NEVER ZEROED.
 
         Strategy:
         1. Use binary search to find the right gamma
@@ -569,20 +811,25 @@ class DataGenerator:
         """
         X_sparse = X.copy()
 
-        # Count current non-zero values
-        non_zero_mask = X_sparse > 0
+        # Get modifiable features
+        modifiable_features = self._get_modifiable_features(X)
+
+        # Count current non-zero values in MODIFIABLE features only
+        non_zero_mask = X_sparse[modifiable_features] > 0
         num_non_zero = non_zero_mask.sum().sum()
-        current_zeros = (X_sparse == 0).sum().sum()
+        current_zeros = (X_sparse[modifiable_features] == 0).sum().sum()
 
         if num_non_zero < num_zeros_to_add:
             raise ValueError(
                 f"Cannot add {num_zeros_to_add} zeros. "
-                f"Only {num_non_zero} non-zero values available."
+                f"Only {num_non_zero} non-zero values available in modifiable features."
             )
 
         if verbose:
             print(f"  Using power transformation to add {num_zeros_to_add} zeros")
-            print(f"  Current zeros: {current_zeros}")
+            if self.protected_features:
+                print(f"  🛡️  Protected features: {len(self.protected_features)} (will not be zeroed)")
+            print(f"  Current zeros in modifiable features: {current_zeros}")
             print(f"  Non-zero values available: {num_non_zero}")
             print(f"  Fixed threshold: {threshold:.2e}")
 
@@ -598,15 +845,19 @@ class DataGenerator:
         for iteration in range(max_iterations):
             gamma = (gamma_min + gamma_max) / 2
 
-            # Apply power transformation
-            X_transformed = X_sparse ** (1 + gamma)
+            # Apply power transformation ONLY to modifiable features
+            X_transformed = X_sparse.copy()
+            X_transformed[modifiable_features] = X_sparse[modifiable_features] ** (1 + gamma)
 
-            # Apply fixed threshold
+            # Apply fixed threshold ONLY to modifiable features
             X_thresholded = X_transformed.copy()
-            X_thresholded[X_thresholded < threshold] = 0.0
+            modifiable_mask = X_thresholded[modifiable_features] < threshold
+            X_thresholded.loc[:, modifiable_features] = X_thresholded[modifiable_features].where(
+                ~modifiable_mask, 0.0
+            )
 
-            # Count new zeros created
-            new_zeros = (X_thresholded == 0).sum().sum() - current_zeros
+            # Count new zeros created in modifiable features
+            new_zeros = (X_thresholded[modifiable_features] == 0).sum().sum() - current_zeros
             diff = abs(new_zeros - num_zeros_to_add)
 
             if verbose and iteration % 10 == 0:
@@ -638,7 +889,7 @@ class DataGenerator:
             if verbose:
                 print(f"  ⚠ Max iterations reached. Using gamma={best_gamma:.3f}")
                 print(
-                    f"    Created {(best_X_sparse == 0).sum().sum() - current_zeros} new zeros (target: {num_zeros_to_add})")
+                    f"    Created {(best_X_sparse[modifiable_features] == 0).sum().sum() - current_zeros} new zeros (target: {num_zeros_to_add})")
             X_final = best_X_sparse
 
         # Renormalize each row to sum to 1
@@ -653,7 +904,7 @@ class DataGenerator:
             X_final = X_final.div(row_sums, axis=0)
 
         if verbose:
-            final_zeros = (X_final == 0).sum().sum()
+            final_zeros = (X_final[modifiable_features] == 0).sum().sum()
             print(f"  Final zero count: {final_zeros} (added {final_zeros - current_zeros})")
 
         return X_final
@@ -731,412 +982,3 @@ class DataGenerator:
         X_dense = X_dense.div(row_sums, axis=0)
 
         return X_dense
-
-    def get_stats(self) -> dict:
-        """
-        Get statistics about the generated data.
-
-        Returns
-        -------
-        dict
-            Statistics dictionary
-        """
-        if self.X_generated is None:
-            raise ValueError("No generated data available. Call generate() first.")
-
-        stats = {
-            'dataset_name': self.dataset_name,
-            'generator_type': self.generator_type,
-            'original_shape': self.X_original.shape if self.X_original is not None else None,
-            'generated_shape': self.X_generated.shape,
-            'sparsity': (self.X_generated == 0).mean(axis=1).mean(),
-            'mean_abundance': self.X_generated.mean(axis=1).mean(),
-            'n_samples': len(self.X_generated),
-            'n_features': self.X_generated.shape[1]
-        }
-
-        if self.X_original is not None:
-            stats['original_sparsity'] = (self.X_original == 0).mean(axis=1).mean()
-            stats['sparsity_increase'] = (
-                    (self.X_generated == 0).mean(axis=1).mean() -
-                    (self.X_original == 0).mean(axis=1).mean()
-            )
-
-        if self.y_original is not None:
-            stats['n_classes'] = len(np.unique(self.y_original))
-            stats['class_distribution'] = dict(pd.Series(self.y_original).value_counts())
-
-        return stats
-
-    def visualize_tsne(
-            self,
-            X: Optional[pd.DataFrame] = None,
-            y: Optional[pd.Series] = None,
-            perplexity: int = 30,
-            n_iter: int = 500
-    ):
-        """
-        Create t-SNE visualization of the data.
-
-        Parameters
-        ----------
-        X : pd.DataFrame, optional
-            Data to visualize. If None, uses X_generated or X_original
-        y : pd.Series, optional
-            Labels for coloring. If None, uses y_original
-        perplexity : int
-            t-SNE perplexity parameter
-        n_iter : int
-            Number of iterations
-
-        Returns
-        -------
-        lets_plot figure
-        """
-        if X is None:
-            X = self.X_generated if self.X_generated is not None else self.X_original
-        if y is None:
-            y = self.y_original
-
-        if X is None:
-            raise ValueError("No data available for visualization")
-
-        # Run t-SNE
-        tsne = TSNE(perplexity=perplexity, n_iter=n_iter, random_state=42)
-        embedding = tsne.fit(X.values)
-
-        # Create dataframe for plotting
-        plot_df = pd.DataFrame({
-            'TSNE1': embedding[:, 0],
-            'TSNE2': embedding[:, 1],
-            'label': y.values if y is not None else 'unknown'
-        })
-
-        # Create plot
-        return (
-                ggplot(plot_df, aes(x='TSNE1', y='TSNE2', color='label')) +
-                geom_point(size=2, alpha=0.7) +
-                labs(title=f't-SNE: {self.dataset_name} ({self.generator_type})',
-                     x='t-SNE 1', y='t-SNE 2') +
-                theme_minimal()
-        )
-
-#%%
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from typing import Tuple
-
-# --------------------------
-# Normalization
-# --------------------------
-def normalize_rows(df: pd.DataFrame) -> pd.DataFrame:
-    row_sums = df.sum(axis=1)
-    return df.div(row_sums, axis=0)
-
-# --------------------------
-# Heatmap Comparison
-# --------------------------
-def plot_heatmap_comparison(
-        X_original: pd.DataFrame,
-        X_transformed: pd.DataFrame,
-        title_original: str = "Original Data",
-        title_transformed: str = "Transformed Data",
-        figsize: Tuple[int, int] = (16, 6),
-        cmap: str = "YlOrRd",
-        vmin: float = 0
-):
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    # Separate vmax for each heatmap
-    vmax_orig = np.percentile(X_original.values, 99)
-    vmax_trans = np.percentile(X_transformed.values, 99)
-
-    sns.heatmap(
-        X_original.T,
-        ax=axes[0],
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax_orig,
-        cbar_kws={'label': 'Abundance'},
-        xticklabels=False,
-        yticklabels=False
-    )
-    axes[0].set_title(title_original)
-
-    sns.heatmap(
-        X_transformed.T,
-        ax=axes[1],
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax_trans,
-        cbar_kws={'label': 'Abundance'},
-        xticklabels=False,
-        yticklabels=False
-    )
-    axes[1].set_title(title_transformed)
-
-    plt.tight_layout()
-    plt.show()
-
-
-
-# ================================================================
-# LOAD ORIGINAL DATA (UNNORMALIZED)
-# ================================================================
-X_original, y = open_pasolli('abundance_cirrhosis--stagediscovery')
-X_original, y = open_and_filter(X_original, 0.0, 0.0)
-
-# Ensure float
-X_original = X_original.astype(float)
-
-print(f"Original data shape: {X_original.shape}")
-print(f"Original sparsity: {(X_original == 0).sum().sum() / X_original.size:.2%}")
-print("Example original row sums:", X_original.sum(axis=1).head())
-print("=" * 60)
-
-# Normalized version for FAIR COMPARISON
-X_norm = normalize_rows(X_original)
-
-
-
-# ================================================================
-# EXAMPLE 1: Remove Features - Random Selection
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 1: Remove Features - Random Selection")
-print("=" * 60)
-
-gen1 = DataGenerator(
-    generator_type='remove_features',
-    k=50,
-    selection_method='random',
-    seed=42,
-    verbose=True
-)
-
-X_reduced_random = gen1.generate(X_original).astype(float)
-X_reduced_random_norm = normalize_rows(X_reduced_random)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_reduced_random_norm,
-    title_original="Original Data (Normalized)",
-    title_transformed="After Removing 50 Random Features (Normalized)",
-    figsize=(16, 6)
-)
-
-
-
-# ================================================================
-# EXAMPLE 2: Remove 100 Lowest Abundance Features
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 2: Remove 100 Lowest Abundance Features")
-print("=" * 60)
-
-gen2 = DataGenerator(
-    generator_type='remove_features',
-    k=100,
-    selection_method='lowest_abundance',
-    seed=42,
-    verbose=True
-)
-
-X_reduced_low = gen2.generate(X_original).astype(float)
-X_reduced_low_norm = normalize_rows(X_reduced_low)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_reduced_low_norm,
-    title_original="Original Data (Normalized)",
-    title_transformed="After Removing 100 Lowest Abundance Features (Normalized)",
-    figsize=(16, 6)
-)
-
-
-
-# ================================================================
-# EXAMPLE 3: Increase Sparsity to 85%
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 3: Adjust Sparsity → 85%")
-print("=" * 60)
-
-gen3 = DataGenerator(
-    generator_type='sparsity',
-    target_sparsity=0.85,
-    verbose=True
-)
-
-X_sparse_85 = gen3._adjust_sparsity(X_original).astype(float)
-X_sparse_85_norm = normalize_rows(X_sparse_85)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_sparse_85_norm,
-    title_original=f"Original Data (Normalized)",
-    title_transformed="After Increasing Sparsity to 85% (Normalized)",
-    figsize=(16, 6),
-    cmap="Blues"
-)
-
-
-
-# ================================================================
-# EXAMPLE 4: Decrease Sparsity to 60%
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 4: Adjust Sparsity → 60%")
-print("=" * 60)
-
-gen4 = DataGenerator(
-    generator_type='sparsity',
-    target_sparsity=0.60,
-    noise_range=(1e-7, 1e-5),
-    verbose=True
-)
-
-X_sparse_60 = gen4._adjust_sparsity(X_original).astype(float)
-X_sparse_60_norm = normalize_rows(X_sparse_60)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_sparse_60_norm,
-    title_original="Original Data (Normalized)",
-    title_transformed="After Decreasing Sparsity to 60% (Normalized)",
-    figsize=(16, 6),
-    cmap="Greens"
-)
-
-
-
-# ================================================================
-# EXAMPLE 5: Add Random Features (50)
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 5: Add 50 Random Low-Abundance Features")
-print("=" * 60)
-
-gen5 = DataGenerator(
-    generator_type='add_random_features',
-    k=50,
-    min_abundance=1e-5,
-    max_abundance=1e-4,
-    seed=42,
-    verbose=True
-)
-
-X_aug_50 = gen5.generate(X_original).astype(float)
-X_aug_50_norm = normalize_rows(X_aug_50)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_aug_50_norm,
-    title_original="Original Data (Normalized)",
-    title_transformed="After Adding 50 Random Features (Normalized)",
-    figsize=(16, 6),
-    cmap="Purples"
-)
-
-
-
-# ================================================================
-# EXAMPLE 6: Add Random Features (100)
-# ================================================================
-print("\n" + "=" * 60)
-print("EXAMPLE 6: Add 100 Random Medium-Abundance Features")
-print("=" * 60)
-
-gen6 = DataGenerator(
-    generator_type='add_random_features',
-    k=100,
-    min_abundance=1e-4,
-    max_abundance=1e-3,
-    seed=123,
-    verbose=True
-)
-
-X_aug_100 = gen6.generate(X_original).astype(float)
-X_aug_100_norm = normalize_rows(X_aug_100)
-
-plot_heatmap_comparison(
-    X_norm,
-    X_aug_100_norm,
-    title_original="Original Data (Normalized)",
-    title_transformed="After Adding 100 Random Features (Normalized)",
-    figsize=(16, 6),
-    cmap="Oranges"
-)
-
-
-
-# ================================================================
-# SUMMARY TABLE
-# ================================================================
-print("\n" + "=" * 60)
-print("SUMMARY OF ALL TRANSFORMATIONS")
-print("=" * 60)
-
-transformations = [
-    ("Original (Norm)", X_norm),
-    ("Remove 50 Random", X_reduced_random_norm),
-    ("Remove 100 Low", X_reduced_low_norm),
-    ("Sparsity 85%", X_sparse_85_norm),
-    ("Sparsity 60%", X_sparse_60_norm),
-    ("Add 50 Random", X_aug_50_norm),
-    ("Add 100 Random", X_aug_100_norm),
-]
-
-summary_df = pd.DataFrame([
-    {
-        'Transformation': name,
-        'Rows': data.shape[0],
-        'Features': data.shape[1],
-        'Sparsity': f"{(data == 0).sum().sum() / data.size:.2%}",
-        'Mean Abundance': f"{data.mean().mean():.3e}"
-    }
-    for name, data in transformations
-])
-
-print(summary_df.to_string(index=False))
-
-
-
-# ================================================================
-# COMPARATIVE GRID (optional)
-# ================================================================
-print("\n" + "=" * 60)
-print("Creating comparative visualization...")
-print("=" * 60)
-
-fig, axes = plt.subplots(2, 4, figsize=(20, 10))
-axes = axes.flatten()
-
-# Remove last empty subplot
-fig.delaxes(axes[-1])
-
-for idx, (name, data) in enumerate(transformations):
-    vmax_val = np.percentile(data.values, 99)
-
-    sns.heatmap(
-        data.T,
-        ax=axes[idx],
-        cmap="viridis",
-        vmin=0,
-        vmax=vmax_val,
-        cbar=True,
-        xticklabels=False,
-        yticklabels=False
-    )
-
-    sparsity = (data == 0).sum().sum() / data.size
-    axes[idx].set_title(
-        f"{name}\n{data.shape[1]} features, Sparsity: {sparsity:.1%}",
-        fontsize=11,
-        fontweight='bold'
-    )
-
-plt.tight_layout()
-plt.show()
