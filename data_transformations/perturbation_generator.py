@@ -1,3 +1,5 @@
+#%%
+
 import numpy as np
 import pandas as pd
 from typing import Optional, Tuple, List, Union
@@ -337,7 +339,7 @@ class DataGenerator:
         return informative_features
 
     def _get_modifiable_features(self, X: pd.DataFrame) -> List[str]:
-        """Get list of features that can be modified (not protected)."""
+        """Get list of features that can be perturbed (not protected)."""
         all_features = X.columns.tolist()
         modifiable = [f for f in all_features if f not in self.protected_features]
         return modifiable
@@ -861,7 +863,7 @@ class DataGenerator:
             diff = abs(new_zeros - num_zeros_to_add)
 
             if verbose and iteration % 10 == 0:
-                print(f"    Iteration {iteration}: gamma={gamma:.3f}, new_zeros={new_zeros}, diff={diff}")
+                print(f"Iteration {iteration}: gamma={gamma:.3f}, new_zeros={new_zeros}, diff={diff}")
 
             # Track best result
             if diff < best_diff:
@@ -872,7 +874,7 @@ class DataGenerator:
             # Check convergence
             if diff <= tolerance:
                 if verbose:
-                    print(f"  ✓ Found gamma={gamma:.3f} creating {new_zeros} new zeros (target: {num_zeros_to_add})")
+                    print(f"✓ Found gamma={gamma:.3f} creating {new_zeros} new zeros (target: {num_zeros_to_add})")
                 X_final = X_thresholded
                 break
 
@@ -982,3 +984,361 @@ class DataGenerator:
         X_dense = X_dense.div(row_sums, axis=0)
 
         return X_dense
+
+    #%%
+    def visualize_perturbations(
+            self,
+            perturbation_params: List[dict],
+            method: str = 'pca',
+            figsize: Tuple[int, int] = (15, 10),
+            save_path: Optional[str] = None,
+            random_state: int = 42
+    ) -> None:
+        """
+        Create scatter plots comparing original data with multiple perturbations.
+
+        Parameters
+        ----------
+        perturbation_params : list of dict
+            List of parameter dictionaries for each perturbation.
+            Each dict should contain parameters for the generate() method.
+            Example: [{'k': 10}, {'k': 50}, {'k': 100}]
+        method : str
+            Dimensionality reduction method:
+            - 'pca': Principal Component Analysis (default)
+            - 'tsne': t-SNE
+            - 'umap': UMAP (requires umap-learn package)
+        figsize : tuple
+            Figure size (width, height)
+        save_path : str, optional
+            Path to save the figure. If None, display only.
+        random_state : int
+            Random seed for reproducibility
+
+        Examples
+        --------
+        # Visualize feature removal with different k values
+        gen = DataGenerator(generator_type='remove_features')
+        X, y = gen.load_data('abundance_ibd')
+        gen.discover_and_protect(method='rf', n_features=20)
+
+        gen.visualize_perturbations(
+            perturbation_params=[
+                {'k': 10},
+                {'k': 50},
+                {'k': 100},
+                {'k': 200}
+            ],
+            method='pca'
+        )
+
+        # Visualize sparsity with different targets
+        gen = DataGenerator(generator_type='sparsity')
+        X, y = gen.load_data('abundance_ibd')
+        gen.discover_and_protect(method='rf', n_features=20)
+
+        gen.visualize_perturbations(
+            perturbation_params=[
+                {'target_sparsity': 0.3},
+                {'target_sparsity': 0.5},
+                {'target_sparsity': 0.7},
+                {'target_sparsity': 0.9}
+            ],
+            method='tsne'
+        )
+        """
+        import matplotlib.pyplot as plt
+        from sklearn.decomposition import PCA
+        import seaborn as sns
+
+        if self.X_original is None or self.y_original is None:
+            raise ValueError("Data must be loaded first. Call load_data().")
+
+        # Store original generator type to restore later
+        original_gen_type = self.generator_type
+
+        # Prepare data: original + all perturbations
+        datasets = []
+        labels = []
+
+        # Add original data
+        datasets.append(self.X_original)
+        labels.append('Original')
+
+        # Generate perturbed versions
+        print(f"Generating {len(perturbation_params)} perturbations...")
+        for i, params in enumerate(perturbation_params):
+            print(f"  Perturbation {i + 1}/{len(perturbation_params)}: {params}")
+            X_pert = self.generate(**params)
+            datasets.append(X_pert)
+
+            # Create label from parameters
+            param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
+            labels.append(f"Pert {i + 1}: {param_str}")
+
+        # Combine all datasets
+        X_combined = pd.concat(datasets, axis=0, ignore_index=True)
+
+        # Create dataset labels for coloring
+        dataset_labels = []
+        for i, (X, label) in enumerate(zip(datasets, labels)):
+            dataset_labels.extend([label] * len(X))
+
+        # Apply dimensionality reduction
+        print(f"\nApplying {method.upper()} dimensionality reduction...")
+
+        if method == 'pca':
+            from sklearn.decomposition import PCA
+            reducer = PCA(n_components=2, random_state=random_state)
+            X_reduced = reducer.fit_transform(X_combined)
+            var_explained = reducer.explained_variance_ratio_
+            xlabel = f'PC1 ({var_explained[0] * 100:.1f}%)'
+            ylabel = f'PC2 ({var_explained[1] * 100:.1f}%)'
+
+        elif method == 'tsne':
+            from sklearn.manifold import TSNE
+            reducer = TSNE(n_components=2, random_state=random_state, perplexity=30)
+            X_reduced = reducer.fit_transform(X_combined)
+            xlabel = 't-SNE 1'
+            ylabel = 't-SNE 2'
+
+        elif method == 'umap':
+            try:
+                import umap
+                reducer = umap.UMAP(n_components=2, random_state=random_state)
+                X_reduced = reducer.fit_transform(X_combined)
+                xlabel = 'UMAP 1'
+                ylabel = 'UMAP 2'
+            except ImportError:
+                raise ImportError("UMAP requires umap-learn: pip install umap-learn")
+        else:
+            raise ValueError(f"Unknown method: {method}. Use 'pca', 'tsne', or 'umap'")
+
+        # Create plot
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Define colors for each perturbation level
+        colors = sns.color_palette("husl", len(labels))
+
+        # Plot each dataset
+        start_idx = 0
+        for i, (X, label, color) in enumerate(zip(datasets, labels, colors)):
+            end_idx = start_idx + len(X)
+
+            if i == 0:
+                # Original data: larger markers, different shape
+                ax.scatter(
+                    X_reduced[start_idx:end_idx, 0],
+                    X_reduced[start_idx:end_idx, 1],
+                    c=[color],
+                    label=label,
+                    alpha=0.7,
+                    s=100,
+                    marker='o',
+                    edgecolors='black',
+                    linewidths=1.5
+                )
+            else:
+                # Perturbed data
+                ax.scatter(
+                    X_reduced[start_idx:end_idx, 0],
+                    X_reduced[start_idx:end_idx, 1],
+                    c=[color],
+                    label=label,
+                    alpha=0.5,
+                    s=50,
+                    marker='x'
+                )
+
+            start_idx = end_idx
+
+        ax.set_xlabel(xlabel, fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
+        ax.set_title(
+            f'Data Perturbation Comparison ({method.upper()})\n'
+            f'Generator: {self.generator_type}, Protected features: {len(self.protected_features)}',
+            fontsize=14,
+            fontweight='bold'
+        )
+        ax.legend(loc='best', frameon=True, shadow=True)
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            print(f"\nFigure saved to: {save_path}")
+
+        plt.show()
+
+        # Restore original generator type
+        self.generator_type = original_gen_type
+
+    def compare_perturbation_statistics(
+            self,
+            perturbation_params: List[dict],
+            metrics: List[str] = ['sparsity', 'n_features', 'mean_abundance'],
+            figsize: Tuple[int, int] = (12, 4)
+    ) -> pd.DataFrame:
+        """
+        Compare statistics across different perturbation levels.
+
+        Parameters
+        ----------
+        perturbation_params : list of dict
+            List of parameter dictionaries for each perturbation
+        metrics : list of str
+            Metrics to compute:
+            - 'sparsity': Percentage of zeros
+            - 'n_features': Number of features remaining
+            - 'mean_abundance': Mean feature abundance
+            - 'median_abundance': Median feature abundance
+            - 'diversity': Shannon diversity
+        figsize : tuple
+            Figure size
+
+        Returns
+        -------
+        pd.DataFrame
+            Statistics for each perturbation level
+
+        Examples
+        --------
+        stats = gen.compare_perturbation_statistics(
+            perturbation_params=[
+                {'k': 10},
+                {'k': 50},
+                {'k': 100}
+            ],
+            metrics=['sparsity', 'n_features', 'diversity']
+        )
+        print(stats)
+        """
+        import matplotlib.pyplot as plt
+
+        if self.X_original is None:
+            raise ValueError("Data must be loaded first. Call load_data().")
+
+        stats_list = []
+
+        # Compute stats for original
+        stats_list.append(self._compute_stats(self.X_original, 'Original', metrics))
+
+        # Compute stats for each perturbation
+        print(f"Computing statistics for {len(perturbation_params)} perturbations...")
+        for i, params in enumerate(perturbation_params):
+            X_pert = self.generate(**params)
+            param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
+            label = f"Pert {i + 1}"
+            stats_list.append(self._compute_stats(X_pert, label, metrics, params))
+
+        # Create DataFrame
+        stats_df = pd.DataFrame(stats_list)
+
+        # Plot statistics
+        fig, axes = plt.subplots(1, len(metrics), figsize=figsize)
+        if len(metrics) == 1:
+            axes = [axes]
+
+        for ax, metric in zip(axes, metrics):
+            ax.plot(range(len(stats_df)), stats_df[metric], marker='o', linewidth=2, markersize=8)
+            ax.set_xticks(range(len(stats_df)))
+            ax.set_xticklabels(stats_df['label'], rotation=45, ha='right')
+            ax.set_ylabel(metric.replace('_', ' ').title())
+            ax.set_title(metric.replace('_', ' ').title())
+            ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+        return stats_df
+
+    def _compute_stats(
+            self,
+            X: pd.DataFrame,
+            label: str,
+            metrics: List[str],
+            params: Optional[dict] = None
+    ) -> dict:
+        """Helper function to compute statistics for a dataset."""
+        from scipy.stats import entropy
+
+        stats = {'label': label}
+
+        if params:
+            stats.update(params)
+
+        if 'sparsity' in metrics:
+            sparsity = (X == 0).sum().sum() / X.size
+            stats['sparsity'] = sparsity
+
+        if 'n_features' in metrics:
+            stats['n_features'] = X.shape[1]
+
+        if 'mean_abundance' in metrics:
+            stats['mean_abundance'] = X.mean().mean()
+
+        if 'median_abundance' in metrics:
+            stats['median_abundance'] = X.median().median()
+
+        if 'diversity' in metrics:
+            # Shannon diversity per sample, then average
+            diversities = []
+            for i in range(len(X)):
+                row = X.iloc[i]
+                row_nonzero = row[row > 0]
+                if len(row_nonzero) > 0:
+                    diversities.append(entropy(row_nonzero))
+            stats['diversity'] = np.mean(diversities) if diversities else 0
+
+        return stats
+
+    #%%
+
+    # 1. Setup
+    from data_generator import DataGenerator
+
+    gen = DataGenerator(
+        generator_type='remove_features',
+        data_source='pasolli'
+    )
+    X, y = gen.load_data('abundance_ibd')
+
+    # 2. Protect important features
+    protected = gen.discover_and_protect(method='random_forest', n_features=20)
+
+    # 3. Visualize perturbations with different k values
+    gen.visualize_perturbations(
+        perturbation_params=[
+            {'k': 10, 'selection_method': 'random', 'seed': 42},
+            {'k': 50, 'selection_method': 'random', 'seed': 42},
+            {'k': 100, 'selection_method': 'random', 'seed': 42},
+            {'k': 200, 'selection_method': 'random', 'seed': 42}
+        ],
+        method='pca',
+        save_path='perturbation_comparison_pca.png'
+    )
+
+    # 4. Also try with t-SNE
+    gen.visualize_perturbations(
+        perturbation_params=[
+            {'k': 10, 'selection_method': 'random', 'seed': 42},
+            {'k': 50, 'selection_method': 'random', 'seed': 42},
+            {'k': 100, 'selection_method': 'random', 'seed': 42},
+            {'k': 200, 'selection_method': 'random', 'seed': 42}
+        ],
+        method='tsne',
+        save_path='perturbation_comparison_tsne.png'
+    )
+
+    # 5. Compare statistics
+    stats = gen.compare_perturbation_statistics(
+        perturbation_params=[
+            {'k': 10, 'seed': 42},
+            {'k': 50, 'seed': 42},
+            {'k': 100, 'seed': 42},
+            {'k': 200, 'seed': 42}
+        ],
+        metrics=['sparsity', 'n_features', 'mean_abundance', 'diversity']
+    )
+    print(stats)

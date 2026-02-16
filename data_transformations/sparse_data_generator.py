@@ -62,7 +62,7 @@ class DataGenerator:
         self.data_source = data_source
         self.dataset_name = dataset_name
         self.filter_params = filter_params or (0.0, 0.0)
-        self.protected_features = protected_features or [] 
+        self.protected_features = protected_features or []
         self.params = kwargs
 
         # Store original data
@@ -610,7 +610,7 @@ class DataGenerator:
             diff = abs(new_zeros - num_zeros_to_add)
 
             if verbose and iteration % 10 == 0:
-                print(f"    Iteration {iteration}: gamma={gamma:.3f}, new_zeros={new_zeros}, diff={diff}")
+                print(f"Iteration {iteration}: gamma={gamma:.3f}, new_zeros={new_zeros}, diff={diff}")
 
             # Track best result
             if diff < best_diff:
