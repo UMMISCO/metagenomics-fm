@@ -39,7 +39,7 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
         clf = TabPFNClassifier(device=device)
         print("we are using TabPFNv2 model")
     elif model_name == 'tabicl':
-        clf = TabICLClassifier()
+        clf = TabICLClassifier(device=device)
         # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, checkpoint_version="tabicl-classifier-v1.1-0506.ckpt")
         print("we are using TabICL model")
     return clf
@@ -199,9 +199,7 @@ if __name__ == '__main__':
         if "abundance" in dataset:
             print(dataset)
             X, y = open_pasolli(dataset)
-            # th_abundance = 0.01
-            th_presence = 0.0
-            th_abundance = 0.0
+            th_abundance = 0.01
 
         # elif "metacardis" in dataset:
         #     print(dataset)
