@@ -1,9 +1,19 @@
 #%%
-
+import os
+import sys
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple, List, Union
+from openTSNE import TSNE
+from lets_plot import *
+from typing import Tuple, Optional, List, Union
 
+sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+
+from testing.testing_data.pasolli.pasolli import open_pasolli
+from testing.testing_data.metacardis.metacardis import open_metacardis
+from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
+
+#%%
 
 class DataGenerator:
     """
@@ -985,7 +995,7 @@ class DataGenerator:
 
         return X_dense
 
-    #%%
+
     def visualize_perturbations(
             self,
             perturbation_params: List[dict],
@@ -1293,52 +1303,51 @@ class DataGenerator:
 
         return stats
 
-    #%%
+#%%
 
-    # 1. Setup
-    from data_generator import DataGenerator
+# 1. Setup
 
-    gen = DataGenerator(
-        generator_type='remove_features',
-        data_source='pasolli'
-    )
-    X, y = gen.load_data('abundance_ibd')
+gen = DataGenerator(
+    generator_type='remove_features',
+    data_source='pasolli'
+)
+X, y = gen.load_data('abundance_ibd')
 
-    # 2. Protect important features
-    protected = gen.discover_and_protect(method='random_forest', n_features=20)
+# 2. Protect important features
+protected = gen.discover_and_protect(method='random_forest', n_features=20)
 
-    # 3. Visualize perturbations with different k values
-    gen.visualize_perturbations(
-        perturbation_params=[
-            {'k': 10, 'selection_method': 'random', 'seed': 42},
-            {'k': 50, 'selection_method': 'random', 'seed': 42},
-            {'k': 100, 'selection_method': 'random', 'seed': 42},
-            {'k': 200, 'selection_method': 'random', 'seed': 42}
-        ],
-        method='pca',
-        save_path='perturbation_comparison_pca.png'
-    )
+# 3. Visualize perturbations with different k values
+gen.visualize_perturbations(
+    perturbation_params=[
+        {'k': 10, 'selection_method': 'random', 'seed': 42},
+        {'k': 50, 'selection_method': 'random', 'seed': 42},
+        {'k': 100, 'selection_method': 'random', 'seed': 42},
+        {'k': 200, 'selection_method': 'random', 'seed': 42}
+    ],
+    method='pca',
+    save_path='perturbation_comparison_pca.png'
+)
 
-    # 4. Also try with t-SNE
-    gen.visualize_perturbations(
-        perturbation_params=[
-            {'k': 10, 'selection_method': 'random', 'seed': 42},
-            {'k': 50, 'selection_method': 'random', 'seed': 42},
-            {'k': 100, 'selection_method': 'random', 'seed': 42},
-            {'k': 200, 'selection_method': 'random', 'seed': 42}
-        ],
-        method='tsne',
-        save_path='perturbation_comparison_tsne.png'
-    )
+# 4. Also try with t-SNE
+gen.visualize_perturbations(
+    perturbation_params=[
+        {'k': 10, 'selection_method': 'random', 'seed': 42},
+        {'k': 50, 'selection_method': 'random', 'seed': 42},
+        {'k': 100, 'selection_method': 'random', 'seed': 42},
+        {'k': 200, 'selection_method': 'random', 'seed': 42}
+    ],
+    method='tsne',
+    save_path='perturbation_comparison_tsne.png'
+)
 
-    # 5. Compare statistics
-    stats = gen.compare_perturbation_statistics(
-        perturbation_params=[
-            {'k': 10, 'seed': 42},
-            {'k': 50, 'seed': 42},
-            {'k': 100, 'seed': 42},
-            {'k': 200, 'seed': 42}
-        ],
-        metrics=['sparsity', 'n_features', 'mean_abundance', 'diversity']
-    )
-    print(stats)
+# 5. Compare statistics
+stats = gen.compare_perturbation_statistics(
+    perturbation_params=[
+        {'k': 10, 'seed': 42},
+        {'k': 50, 'seed': 42},
+        {'k': 100, 'seed': 42},
+        {'k': 200, 'seed': 42}
+    ],
+    metrics=['sparsity', 'n_features', 'mean_abundance', 'diversity']
+)
+print(stats)
