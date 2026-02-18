@@ -522,9 +522,13 @@ class PerturbationStats:
             row['median_abundance'] = X.median().median()
 
         if 'diversity' in self.metrics:
-            diversities = [
-                entropy(row_[row_ > 0]) for _, row_ in X.iterrows() if (row_ > 0).any()
-            ]
+            diversities = []
+            for _, row_ in X.iterrows():
+                # Ensure numeric dtype and filter positives
+                row_vals = pd.to_numeric(row_, errors='coerce').fillna(0.0).values
+                row_nonzero = row_vals[row_vals > 0]
+                if len(row_nonzero) > 0:
+                    diversities.append(entropy(row_nonzero))
             row['diversity'] = float(np.mean(diversities)) if diversities else 0.0
 
         return row
@@ -575,14 +579,19 @@ class PerturbationVisualizer:
         labels = [label for label, _ in datasets]
         frames = [X for _, X in datasets]
 
-        # Align columns: use only columns present in all datasets
-        common_cols = frames[0].columns
-        for f in frames[1:]:
-            common_cols = common_cols.intersection(f.columns)
-        frames = [f[common_cols] for f in frames]
+        # Use the original (first) dataset's column space as the reference.
+        # Perturbed datasets may have fewer columns (remove_features) or more
+        # (add_random_features). Reindex every frame to the reference columns,
+        # filling missing values with 0, so projections are always comparable.
+        ref_cols = frames[0].columns
+        frames = [f.reindex(columns=ref_cols, fill_value=0.0) for f in frames]
 
-        X_combined = pd.concat(frames, axis=0, ignore_index=True)
-        X_reduced, xlabel, ylabel = self._reduce(X_combined, method, random_state)
+        # Fit the reducer on the ORIGINAL data only, then transform all datasets.
+        # This prevents the perturbed datasets from distorting the projection axes
+        # and stops outliers in the original from collapsing perturbed points.
+        X_reduced, xlabel, ylabel = self._reduce(
+            frames[0], frames[1:], method, random_state
+        )
 
         fig, ax = plt.subplots(figsize=figsize)
         palette = sns.color_palette("husl", len(datasets))
@@ -617,22 +626,33 @@ class PerturbationVisualizer:
 
     @staticmethod
     def _reduce(
-        X: pd.DataFrame,
+        X_original: pd.DataFrame,
+        X_perturbed_list: List[pd.DataFrame],
         method: str,
         random_state: int,
     ) -> Tuple[np.ndarray, str, str]:
+        """
+        Fit the reducer on X_original only, then transform every dataset.
+        This keeps the projection axes stable regardless of how many features
+        were removed from the perturbed datasets.
+        For t-SNE (no transform() method) we fit on the full concatenation.
+        """
         method = method.lower()
+        all_frames = [X_original] + X_perturbed_list
+
         if method == 'pca':
             from sklearn.decomposition import PCA
             reducer = PCA(n_components=2, random_state=random_state)
-            X_r = reducer.fit_transform(X)
+            reducer.fit(X_original)
+            X_r = np.vstack([reducer.transform(f) for f in all_frames])
             var = reducer.explained_variance_ratio_
             return X_r, f'PC1 ({var[0]*100:.1f}%)', f'PC2 ({var[1]*100:.1f}%)'
 
         elif method == 'tsne':
             from sklearn.manifold import TSNE
+            X_combined = pd.concat(all_frames, axis=0, ignore_index=True)
             reducer = TSNE(n_components=2, random_state=random_state, perplexity=30)
-            X_r = reducer.fit_transform(X)
+            X_r = reducer.fit_transform(X_combined)
             return X_r, 't-SNE 1', 't-SNE 2'
 
         elif method == 'umap':
@@ -641,7 +661,8 @@ class PerturbationVisualizer:
             except ImportError:
                 raise ImportError("Install umap-learn: pip install umap-learn")
             reducer = umap.UMAP(n_components=2, random_state=random_state)
-            X_r = reducer.fit_transform(X)
+            reducer.fit(X_original)
+            X_r = np.vstack([reducer.transform(f) for f in all_frames])
             return X_r, 'UMAP 1', 'UMAP 2'
 
         else:
@@ -693,8 +714,9 @@ class DataLoader:
         else:
             raise ValueError(f"Unknown data_source '{data_source}'.")
 
-        # FIX: pass both X and y to open_and_filter so labels stay aligned
-        X, y = open_and_filter(X, y, *filter_params)
+        # open_and_filter signature: open_and_filter(X, p1, p2) -> (X, y)
+        # It derives y internally from X, so we do not pass y in.
+        X, y = open_and_filter(X, *filter_params)
         return X, y
 
 
