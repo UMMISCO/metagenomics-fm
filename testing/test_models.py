@@ -7,6 +7,7 @@ from typing import Union
 
 import numpy as np
 import torch
+
 import pytorch_lightning as L
 L.seed_everything(42)
 
@@ -20,6 +21,7 @@ from testing_data.pasolli.pasolli import open_pasolli
 from testing_data.preprocessing.filter_or_logic import open_and_filter
 
 from tabicl import TabICLClassifier
+from tabdpt import TabDPTClassifier
 # from foundation_models.src.tabicl_original.sklearn.classifier import TabICLClassifier
 # from sap_rpt_oss import SAP_RPT_OSS_Classifier
 
@@ -34,6 +36,8 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
     # if model_name == "context_tab":
     #     clf = SAP_RPT_OSS_Classifier(max_context_size=8192, bagging=8)
     #     print("we are using ContextTab model")
+    if model_name == 'tabdpt':
+        clf = TabDPTClassifier()
     if model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         clf = TabPFNClassifier(device=device)
@@ -103,10 +107,23 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
             if isinstance(X_test, pd.DataFrame):
                 X_test = X_test.to_numpy()
 
+        if trained_model_name == 'tabdpt':
+            y_train = np.asarray(y_train)
+
         print('Final dimensions: ', X_train.shape, X_test.shape, type(X_train), type(X_test) )
 
         # Train the model
         model = load_tabfn_model(trained_model_name, epoch, device)
+
+        #######
+
+        n_rows, n_features = X_train.shape
+        pad = 200 - n_rows  # add dummy rows to increase row count
+        if pad > 0:
+            X_train = np.vstack([X_train, np.zeros((pad, n_features), dtype=np.float32)])
+            y_train = np.concatenate([y_train, np.zeros(pad, dtype=y_train.dtype)])
+
+        #####
 
         model.fit(X_train, y_train)
 

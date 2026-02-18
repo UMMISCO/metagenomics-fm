@@ -177,6 +177,7 @@ class Perturbation:
     @staticmethod
     def _renormalize(X: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
         """Divide each row by its sum so rows sum to 1. Rows of all-zeros are left as-is."""
+        X = X.astype(float)
         row_sums = X.sum(axis=1)
         zero_rows = row_sums == 0
         if verbose and zero_rows.any():
@@ -258,16 +259,18 @@ class RemoveFeaturesPerturbation(Perturbation):
 
         rng = np.random.default_rng(seed)
 
+        X_mod = X[modifiable].astype(float)
+
         if selection_method == 'random':
             to_remove = rng.choice(modifiable, size=k, replace=False).tolist()
         elif selection_method == 'lowest_abundance':
-            to_remove = X[modifiable].mean().nsmallest(k).index.tolist()
+            to_remove = X_mod.mean().nsmallest(k).index.tolist()
         elif selection_method == 'highest_abundance':
-            to_remove = X[modifiable].mean().nlargest(k).index.tolist()
+            to_remove = X_mod.mean().nlargest(k).index.tolist()
         elif selection_method == 'lowest_prevalence':
-            to_remove = (X[modifiable] > 0).sum().nsmallest(k).index.tolist()
+            to_remove = (X_mod > 0).sum().nsmallest(k).index.tolist()
         elif selection_method == 'highest_prevalence':
-            to_remove = (X[modifiable] > 0).sum().nlargest(k).index.tolist()
+            to_remove = (X_mod > 0).sum().nlargest(k).index.tolist()
 
         return self._remove_and_renormalize(X, to_remove, verbose)
 
@@ -551,122 +554,79 @@ class PerturbationStats:
 
 class PerturbationVisualizer:
     """
-    Produces a single scatter plot overlaying original and all perturbed datasets
-    after dimensionality reduction.
+    One subplot per perturbation, each overlaying:
+      - Original data in grey
+      - Perturbed data in colour
+    Every point = (feature index, feature value) for one sample,
+    so n_samples × n_features points fill each panel.
     """
 
     def plot(
         self,
-        datasets: List[Tuple[str, pd.DataFrame]],
-        method: str = 'pca',
-        figsize: Tuple[int, int] = (10, 7),
-        random_state: int = 42,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        figsize: Tuple[int, int] = (5, 5),  # per-subplot size
         save_path: Optional[str] = None,
-        title: Optional[str] = None,
+        suptitle: Optional[str] = None,
     ) -> None:
         """
+        One subplot per perturbation. Each point is a (sample, feature) pair:
+          X-axis = original value, Y-axis = perturbed value.
+        Points on the diagonal = no change.
+
         Parameters
         ----------
-        datasets : list of (label, X)
-            First entry should be the original data; the rest are perturbations.
-        method : str
-            'pca', 'tsne', or 'umap'
-        figsize : (int, int)
-        random_state : int
-        save_path : str, optional
-        title : str, optional
+        original       : original dataset (X_original)
+        perturbations  : list of (label, X_perturbed)
+        figsize        : size of each individual subplot
+        save_path      : optional path to save the figure
+        suptitle       : overall figure title
         """
-        labels = [label for label, _ in datasets]
-        frames = [X for _, X in datasets]
-
-        # Use the original (first) dataset's column space as the reference.
-        # Perturbed datasets may have fewer columns (remove_features) or more
-        # (add_random_features). Reindex every frame to the reference columns,
-        # filling missing values with 0, so projections are always comparable.
-        ref_cols = frames[0].columns
-        frames = [f.reindex(columns=ref_cols, fill_value=0.0) for f in frames]
-
-        # Fit the reducer on the ORIGINAL data only, then transform all datasets.
-        # This prevents the perturbed datasets from distorting the projection axes
-        # and stops outliers in the original from collapsing perturbed points.
-        X_reduced, xlabel, ylabel = self._reduce(
-            frames[0], frames[1:], method, random_state
+        n = len(perturbations)
+        ncols = min(n, 3)
+        nrows = (n + ncols - 1) // ncols
+        fig, axes = plt.subplots(
+            nrows, ncols,
+            figsize=(figsize[0] * ncols, figsize[1] * nrows),
+            squeeze=False,
         )
+        palette = sns.color_palette("husl", n)
 
-        fig, ax = plt.subplots(figsize=figsize)
-        palette = sns.color_palette("husl", len(datasets))
+        for idx, (label, X_pert) in enumerate(perturbations):
+            ax = axes[idx // ncols][idx % ncols]
 
-        start = 0
-        for i, (label, color) in enumerate(zip(labels, palette)):
-            n = len(frames[i])
-            pts = X_reduced[start: start + n]
-            if i == 0:
-                ax.scatter(pts[:, 0], pts[:, 1], c=[color], label=label,
-                           alpha=0.7, s=80, marker='o', edgecolors='black', linewidths=0.8)
-            else:
-                ax.scatter(pts[:, 0], pts[:, 1], c=[color], label=label,
-                           alpha=0.5, s=40, marker='x')
-            start += n
+            # Align columns: perturbed may have fewer (remove) or more (add) features
+            shared_cols = original.columns.intersection(X_pert.columns)
+            x_vals = original[shared_cols].values.flatten().astype(float)
+            y_vals = X_pert[shared_cols].values.flatten().astype(float)
 
-        ax.set_xlabel(xlabel, fontsize=12)
-        ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_title(
-            title or f'Perturbation Comparison ({method.upper()})',
-            fontsize=13, fontweight='bold',
-        )
-        ax.legend(loc='best', frameon=True, shadow=True, fontsize=9)
-        ax.grid(True, alpha=0.3)
+            ax.scatter(x_vals, y_vals, alpha=0.3, s=8,
+                       color=palette[idx], edgecolors='none',
+                       label=f"n={X_pert.shape[0]}, f={X_pert.shape[1]}")
+
+            # Diagonal reference line (y = x → no change)
+            lim_max = max(x_vals.max(), y_vals.max())
+            ax.plot([0, lim_max], [0, lim_max],
+                    color='black', linewidth=1, linestyle='--', label='y = x (no change)')
+
+            ax.set_xlabel("Original value", fontsize=9)
+            ax.set_ylabel("Perturbed value", fontsize=9)
+            ax.set_title(label, fontsize=9, fontweight='bold')
+            ax.grid(True, linestyle="--", alpha=0.3)
+            ax.legend(fontsize=7, frameon=True)
+
+        # Hide unused axes
+        for idx in range(n, nrows * ncols):
+            axes[idx // ncols][idx % ncols].set_visible(False)
+
+        fig.suptitle(suptitle or "Original vs. Perturbations", fontsize=12, fontweight='bold')
         plt.tight_layout()
 
         if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
             print(f"Figure saved to: {save_path}")
 
         plt.show()
-
-    @staticmethod
-    def _reduce(
-        X_original: pd.DataFrame,
-        X_perturbed_list: List[pd.DataFrame],
-        method: str,
-        random_state: int,
-    ) -> Tuple[np.ndarray, str, str]:
-        """
-        Fit the reducer on X_original only, then transform every dataset.
-        This keeps the projection axes stable regardless of how many features
-        were removed from the perturbed datasets.
-        For t-SNE (no transform() method) we fit on the full concatenation.
-        """
-        method = method.lower()
-        all_frames = [X_original] + X_perturbed_list
-
-        if method == 'pca':
-            from sklearn.decomposition import PCA
-            reducer = PCA(n_components=2, random_state=random_state)
-            reducer.fit(X_original)
-            X_r = np.vstack([reducer.transform(f) for f in all_frames])
-            var = reducer.explained_variance_ratio_
-            return X_r, f'PC1 ({var[0]*100:.1f}%)', f'PC2 ({var[1]*100:.1f}%)'
-
-        elif method == 'tsne':
-            from sklearn.manifold import TSNE
-            X_combined = pd.concat(all_frames, axis=0, ignore_index=True)
-            reducer = TSNE(n_components=2, random_state=random_state, perplexity=30)
-            X_r = reducer.fit_transform(X_combined)
-            return X_r, 't-SNE 1', 't-SNE 2'
-
-        elif method == 'umap':
-            try:
-                import umap
-            except ImportError:
-                raise ImportError("Install umap-learn: pip install umap-learn")
-            reducer = umap.UMAP(n_components=2, random_state=random_state)
-            reducer.fit(X_original)
-            X_r = np.vstack([reducer.transform(f) for f in all_frames])
-            return X_r, 'UMAP 1', 'UMAP 2'
-
-        else:
-            raise ValueError(f"Unknown method '{method}'. Use 'pca', 'tsne', or 'umap'.")
 
 
 # =============================================================================
@@ -811,11 +771,13 @@ class DataGenerator:
             raise ValueError("Provide dataset_name either here or at __init__.")
 
         X, y = self.loader.load(dataset_name, self.data_source, filter_params)
+        X = X.astype(float)
+        X = X.div(X.sum(axis=1), axis=0)  # renormalise rows to sum to 1
         self.X_original = X
         self.y_original = y
         self.selector = FeatureSelector(X, y)
 
-        print(f"Loaded '{dataset_name}': {X.shape[0]} samples, {X.shape[1]} features.")
+        print(f"Loaded '{dataset_name}': {X.shape[0]} samples, {X.shape[1]} features (rows renormalised to sum to 1).")
         return X, y
 
     # ------------------------------------------------------------------
@@ -884,48 +846,41 @@ class DataGenerator:
     def visualize_perturbations(
         self,
         perturbation_params: List[dict],
-        method: str = 'pca',
-        figsize: Tuple[int, int] = (10, 7),
+        figsize: Tuple[int, int] = (5, 5),
         save_path: Optional[str] = None,
-        random_state: int = 42,
     ) -> None:
         """
-        Generate all perturbations and show a **single** scatter plot
-        with the original and every perturbed dataset overlaid.
+        One subplot per perturbation. Each point is a (sample, feature) pair:
+          X-axis = original value, Y-axis = perturbed value.
+        Points on the diagonal = no change.
 
         Parameters
         ----------
-        perturbation_params : list of dict
-            Each dict is forwarded to generate() as keyword arguments.
-        method : str     – 'pca', 'tsne', or 'umap'
-        figsize          – (width, height)
-        save_path        – optional file path to save the figure
-        random_state     – for reproducible dimensionality reduction
+        perturbation_params : list of dict, each forwarded to generate()
+        figsize   – size of each individual subplot (width, height)
+        save_path – optional path to save the figure
         """
         self._require_data()
 
-        datasets: List[Tuple[str, pd.DataFrame]] = [('Original', self.X_original)]
-
+        perturbations: List[Tuple[str, pd.DataFrame]] = []
         print(f"Generating {len(perturbation_params)} perturbations...")
         for i, params in enumerate(perturbation_params, 1):
             param_str = ', '.join(f"{k}={v}" for k, v in params.items())
             print(f"  [{i}/{len(perturbation_params)}] {param_str}")
             X_pert = self.generate(**params)
-            datasets.append((f"Pert {i}: {param_str}", X_pert))
+            perturbations.append((f"Pert {i}: {param_str}", X_pert))
 
-        n_protected = len(self.protected_features)
-        title = (
-            f'Perturbation Comparison ({method.upper()}) — '
-            f'{self.generator_type}, {n_protected} protected features'
+        suptitle = (
+            f'Original vs. Perturbations — {self.generator_type}, '
+            f'{len(self.protected_features)} protected features'
         )
 
         self.visualizer.plot(
-            datasets=datasets,
-            method=method,
+            original=self.X_original,
+            perturbations=perturbations,
             figsize=figsize,
-            random_state=random_state,
             save_path=save_path,
-            title=title,
+            suptitle=suptitle,
         )
 
     # ------------------------------------------------------------------
@@ -1007,16 +962,17 @@ X, y = gen.load_data('abundance_ibd')
 # 3. Discover and protect top informative features
 protected = gen.discover_and_protect(method='random_forest', n_features=20)
 
-# 4. Single scatter plot comparing original vs. four perturbation levels
+# 4. One subplot per perturbation: x = original value, y = perturbed value
+#    Points on the diagonal = no change
 gen.visualize_perturbations(
     perturbation_params=[
-        {'k': 10,  'selection_method': 'random', 'seed': 42},
-        {'k': 50,  'selection_method': 'random', 'seed': 42},
-        {'k': 100, 'selection_method': 'random', 'seed': 42},
-        {'k': 200, 'selection_method': 'random', 'seed': 42},
+        {'k': 10,  'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 50,  'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 100, 'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 200, 'selection_method': 'highest_abundance', 'seed': 42},
     ],
-    method='pca',                          # single plot, change to 'tsne' or 'umap' as needed
-    save_path='perturbation_comparison.png',
+    figsize=(5, 5),           # size of each individual subplot
+    save_path='perturbation_scatter.png',  # optional
 )
 
 # 5. Summary statistics across the same perturbation levels
