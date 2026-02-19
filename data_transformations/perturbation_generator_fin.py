@@ -554,78 +554,259 @@ class PerturbationStats:
 
 class PerturbationVisualizer:
     """
-    One subplot per perturbation, each overlaying:
-      - Original data in grey
-      - Perturbed data in colour
-    Every point = (feature index, feature value) for one sample,
-    so n_samples × n_features points fill each panel.
+    Three scatter plots for perturbation analysis.
+    Each point is always one (sample, feature) pair → n_samples × n_features points total.
+    Only shared features between original and perturbed are plotted (missing ≠ zero).
     """
 
-    def plot(
+    @staticmethod
+    def _paired_vals(
+        original: pd.DataFrame,
+        X_pert: pd.DataFrame,
+    ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
+        """Return (x_vals, y_vals, shared_cols) aligned by sorted shared columns."""
+        shared_cols = sorted(original.columns.intersection(X_pert.columns))
+        x_vals = original[shared_cols].values.flatten().astype(float)
+        y_vals = X_pert[shared_cols].values.flatten().astype(float)
+        return x_vals, y_vals, shared_cols
+
+    # ------------------------------------------------------------------
+    # Plot 1: one subplot per perturbation
+    # ------------------------------------------------------------------
+    def plot_per_perturbation(
         self,
         original: pd.DataFrame,
         perturbations: List[Tuple[str, pd.DataFrame]],
-        figsize: Tuple[int, int] = (5, 5),  # per-subplot size
+        subplot_size: Tuple[int, int] = (5, 5),
         save_path: Optional[str] = None,
-        suptitle: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
-        """
-        One subplot per perturbation. Each point is a (sample, feature) pair:
-          X-axis = original value, Y-axis = perturbed value.
-        Points on the diagonal = no change.
-
-        Parameters
-        ----------
-        original       : original dataset (X_original)
-        perturbations  : list of (label, X_perturbed)
-        figsize        : size of each individual subplot
-        save_path      : optional path to save the figure
-        suptitle       : overall figure title
-        """
+        """One subplot per perturbation. x = original value, y = perturbed value.
+        Total points per panel = n_samples × n_shared_features."""
         n = len(perturbations)
         ncols = min(n, 3)
         nrows = (n + ncols - 1) // ncols
         fig, axes = plt.subplots(
             nrows, ncols,
-            figsize=(figsize[0] * ncols, figsize[1] * nrows),
+            figsize=(subplot_size[0] * ncols, subplot_size[1] * nrows),
             squeeze=False,
         )
         palette = sns.color_palette("husl", n)
 
         for idx, (label, X_pert) in enumerate(perturbations):
             ax = axes[idx // ncols][idx % ncols]
-
-            # Align columns: perturbed may have fewer (remove) or more (add) features
-            shared_cols = original.columns.intersection(X_pert.columns)
-            x_vals = original[shared_cols].values.flatten().astype(float)
-            y_vals = X_pert[shared_cols].values.flatten().astype(float)
+            x_vals, y_vals, shared_cols = self._paired_vals(original, X_pert)
+            n_pts = len(x_vals)  # n_samples × n_shared_features
 
             ax.scatter(x_vals, y_vals, alpha=0.3, s=8,
                        color=palette[idx], edgecolors='none',
-                       label=f"n={X_pert.shape[0]}, f={X_pert.shape[1]}")
-
-            # Diagonal reference line (y = x → no change)
+                       label=f"n_pts={n_pts} (s={X_pert.shape[0]}, f={X_pert.shape[1]})")
             lim_max = max(x_vals.max(), y_vals.max())
-            ax.plot([0, lim_max], [0, lim_max],
-                    color='black', linewidth=1, linestyle='--', label='y = x (no change)')
-
+            ax.plot([0, lim_max], [0, lim_max], color='black',
+                    linewidth=1, linestyle='--', label='y = x')
             ax.set_xlabel("Original value", fontsize=9)
             ax.set_ylabel("Perturbed value", fontsize=9)
             ax.set_title(label, fontsize=9, fontweight='bold')
             ax.grid(True, linestyle="--", alpha=0.3)
             ax.legend(fontsize=7, frameon=True)
 
-        # Hide unused axes
         for idx in range(n, nrows * ncols):
             axes[idx // ncols][idx % ncols].set_visible(False)
 
-        fig.suptitle(suptitle or "Original vs. Perturbations", fontsize=12, fontweight='bold')
+        fig.suptitle(title or "Original vs. Perturbations (per perturbation)",
+                     fontsize=12, fontweight='bold')
         plt.tight_layout()
-
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
-            print(f"Figure saved to: {save_path}")
+        plt.show()
 
+    # ------------------------------------------------------------------
+    # Plot 2: all perturbations overlaid, colour = perturbation level
+    # ------------------------------------------------------------------
+    def plot_overlay(
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        figsize: Tuple[int, int] = (8, 7),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """All perturbations overlaid. Colour = perturbation level.
+        Total points per layer = n_samples × n_shared_features."""
+        fig, ax = plt.subplots(figsize=figsize)
+        palette = sns.color_palette("husl", len(perturbations))
+
+        for idx, (label, X_pert) in enumerate(perturbations):
+            x_vals, y_vals, _ = self._paired_vals(original, X_pert)
+            n_pts = len(x_vals)
+            ax.scatter(x_vals, y_vals, alpha=0.3, s=8,
+                       color=palette[idx], edgecolors='none',
+                       label=f"{label} — {n_pts} pts (f={X_pert.shape[1]})")
+
+        all_max = max(
+            original.values.astype(float).max(),
+            max(X.values.astype(float).max() for _, X in perturbations),
+        )
+        ax.plot([0, all_max], [0, all_max], color='black',
+                linewidth=1.2, linestyle='--', label='y = x (no change)')
+        ax.set_xlabel("Original value", fontsize=11)
+        ax.set_ylabel("Perturbed value", fontsize=11)
+        ax.set_title(title or "Original vs. Perturbations (overlay)",
+                     fontsize=12, fontweight='bold')
+        ax.grid(True, linestyle="--", alpha=0.3)
+        ax.legend(fontsize=8, frameon=True, markerscale=2)
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.show()
+
+    # ------------------------------------------------------------------
+    # Plot 3: colour = sample class, black ring = protected feature
+    # ------------------------------------------------------------------
+    def plot_class_and_protected(
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        y_labels: pd.Series,
+        protected_features: List[str],
+        subplot_size: Tuple[int, int] = (6, 6),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """One subplot per perturbation.
+        Colour = sample class label (repeated per feature).
+        Black ring = protected feature."""
+        n = len(perturbations)
+        ncols = min(n, 3)
+        nrows = (n + ncols - 1) // ncols
+        fig, axes = plt.subplots(
+            nrows, ncols,
+            figsize=(subplot_size[0] * ncols, subplot_size[1] * nrows),
+            squeeze=False,
+        )
+
+        classes = sorted(y_labels.unique())
+        class_palette = dict(zip(classes, sns.color_palette("Set2", len(classes))))
+
+        for idx, (label, X_pert) in enumerate(perturbations):
+            ax = axes[idx // ncols][idx % ncols]
+            shared_cols = sorted(original.columns.intersection(X_pert.columns))
+            n_samples = original.shape[0]
+
+            x_vals = original[shared_cols].values.flatten().astype(float)
+            y_vals = X_pert[shared_cols].values.flatten().astype(float)
+
+            # Each (sample, feature) pair gets the colour of that sample's class
+            colours = np.array([class_palette[c] for c in y_labels for _ in shared_cols])
+            # Protected mask: True where the feature is protected
+            is_protected = np.tile([f in protected_features for f in shared_cols], n_samples)
+
+            # Non-protected behind
+            ax.scatter(x_vals[~is_protected], y_vals[~is_protected],
+                       c=colours[~is_protected], alpha=0.2, s=8, edgecolors='none')
+            # Protected on top with black ring
+            ax.scatter(x_vals[is_protected], y_vals[is_protected],
+                       c=colours[is_protected], alpha=0.7, s=25,
+                       edgecolors='black', linewidths=0.6)
+
+            lim_max = max(x_vals.max(), y_vals.max())
+            ax.plot([0, lim_max], [0, lim_max], color='black',
+                    linewidth=1, linestyle='--')
+
+            if idx == 0:
+                for cls, col in class_palette.items():
+                    ax.scatter([], [], color=col, label=str(cls), s=20)
+                ax.scatter([], [], edgecolors='black', facecolors='grey',
+                           s=25, linewidths=0.6, label='protected feature')
+                ax.legend(fontsize=7, frameon=True, title='Class')
+
+            ax.set_xlabel("Original value", fontsize=9)
+            ax.set_ylabel("Perturbed value", fontsize=9)
+            ax.set_title(label, fontsize=9, fontweight='bold')
+            ax.grid(True, linestyle="--", alpha=0.3)
+
+        for idx in range(n, nrows * ncols):
+            axes[idx // ncols][idx % ncols].set_visible(False)
+
+        fig.suptitle(title or "Original vs. Perturbations (by class & protected features)",
+                     fontsize=12, fontweight='bold')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.show()
+
+    # ------------------------------------------------------------------
+    # Plot 4: distribution of (perturbed - original) split by class
+    # ------------------------------------------------------------------
+    def plot_delta_by_class(
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        y_labels: pd.Series,
+        figsize: Tuple[int, int] = (12, 5),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> None:
+        """
+        Boxplot of (perturbed - original) per (perturbation level x class).
+        Each observation is one (sample, feature) delta value.
+        If boxes overlap -> perturbation is class-agnostic.
+        If boxes separate -> perturbation introduces class bias.
+        """
+        classes = sorted(y_labels.unique())
+        class_palette = dict(zip(classes, sns.color_palette("Set2", len(classes))))
+
+        # Build long-form: one row per (sample, feature, perturbation)
+        records = []
+        for label, X_pert in perturbations:
+            shared_cols = sorted(original.columns.intersection(X_pert.columns))
+            for sample_idx, cls in zip(original.index, y_labels):
+                orig_row = original.loc[sample_idx, shared_cols].values.astype(float)
+                pert_row = X_pert.loc[sample_idx, shared_cols].values.astype(float)
+                # Exclude only (0, 0) pairs — keep if non-zero in either original or perturbed
+                nonzero_mask = (orig_row != 0) | (pert_row != 0)
+                for delta in (pert_row[nonzero_mask] - orig_row[nonzero_mask]):
+                    records.append({'perturbation': label, 'class': str(cls), 'delta': delta})
+
+        df_long = pd.DataFrame(records)
+        pert_labels = [label for label, _ in perturbations]
+        n_classes = len(classes)
+        width = 0.8 / n_classes
+        offsets = np.linspace(-(0.8 - width) / 2, (0.8 - width) / 2, n_classes)
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        for cls_idx, cls in enumerate(classes):
+            df_cls = df_long[df_long['class'] == str(cls)]
+            positions = np.arange(len(pert_labels)) + offsets[cls_idx]
+            data_per_pert = [
+                df_cls[df_cls['perturbation'] == lbl]['delta'].values
+                for lbl in pert_labels
+            ]
+            ax.boxplot(
+                data_per_pert,
+                positions=positions,
+                widths=width * 0.9,
+                patch_artist=True,
+                showfliers=False,
+                medianprops=dict(color='black', linewidth=1.5),
+                boxprops=dict(facecolor=class_palette[cls], alpha=0.7),
+                whiskerprops=dict(linewidth=1),
+                capprops=dict(linewidth=1),
+            )
+            ax.scatter([], [], color=class_palette[cls], label=f'Class {cls}', s=40)
+
+        ax.axhline(0, color='black', linewidth=1.2, linestyle='--', label='no change')
+        ax.set_xticks(np.arange(len(pert_labels)))
+        ax.set_xticklabels(pert_labels, rotation=20, ha='right', fontsize=8)
+        ax.set_ylabel("Perturbed - Original (excl. double-zero pairs)", fontsize=11)
+        ax.set_xlabel("Perturbation level", fontsize=11)
+        ax.set_title(title or "Delta abundance by class", fontsize=12, fontweight='bold')
+        ax.legend(fontsize=9, frameon=True)
+        ax.grid(True, linestyle="--", alpha=0.3, axis='y')
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
 
@@ -846,19 +1027,21 @@ class DataGenerator:
     def visualize_perturbations(
         self,
         perturbation_params: List[dict],
-        figsize: Tuple[int, int] = (5, 5),
+        subplot_size: Tuple[int, int] = (5, 5),
         save_path: Optional[str] = None,
     ) -> None:
         """
-        One subplot per perturbation. Each point is a (sample, feature) pair:
-          X-axis = original value, Y-axis = perturbed value.
-        Points on the diagonal = no change.
+        Produces three plots:
+          1. One subplot per perturbation (x=original, y=perturbed)
+          2. All perturbations overlaid, colour = perturbation level
+          3. One subplot per perturbation, colour = class label,
+             black ring = protected feature
 
         Parameters
         ----------
         perturbation_params : list of dict, each forwarded to generate()
-        figsize   – size of each individual subplot (width, height)
-        save_path – optional path to save the figure
+        subplot_size – size of each individual subplot (width, height)
+        save_path    – optional path to save the figures
         """
         self._require_data()
 
@@ -870,17 +1053,44 @@ class DataGenerator:
             X_pert = self.generate(**params)
             perturbations.append((f"Pert {i}: {param_str}", X_pert))
 
-        suptitle = (
+        base_title = (
             f'Original vs. Perturbations — {self.generator_type}, '
             f'{len(self.protected_features)} protected features'
         )
 
-        self.visualizer.plot(
+        # Plot 1: one subplot per perturbation
+        self.visualizer.plot_per_perturbation(
             original=self.X_original,
             perturbations=perturbations,
-            figsize=figsize,
+            subplot_size=subplot_size,
             save_path=save_path,
-            suptitle=suptitle,
+            title=base_title,
+        )
+
+        # Plot 2: all perturbations overlaid
+        self.visualizer.plot_overlay(
+            original=self.X_original,
+            perturbations=perturbations,
+            figsize=(8, 7),
+            title=base_title + " (overlay)",
+        )
+
+        # Plot 3: colour by class, highlight protected features
+        self.visualizer.plot_class_and_protected(
+            original=self.X_original,
+            perturbations=perturbations,
+            y_labels=self.y_original,
+            protected_features=self.protected_features,
+            subplot_size=subplot_size,
+            title=base_title + " (by class & protected)",
+        )
+
+        # Plot 4: delta distribution by class
+        self.visualizer.plot_delta_by_class(
+            original=self.X_original,
+            perturbations=perturbations,
+            y_labels=self.y_original,
+            title=base_title + " - Delta by class",
         )
 
     # ------------------------------------------------------------------
@@ -971,7 +1181,7 @@ gen.visualize_perturbations(
         {'k': 100, 'selection_method': 'highest_abundance', 'seed': 42},
         {'k': 200, 'selection_method': 'highest_abundance', 'seed': 42},
     ],
-    figsize=(5, 5),           # size of each individual subplot
+    subplot_size=(5, 5),      # size of each individual subplot
     save_path='perturbation_scatter.png',  # optional
 )
 

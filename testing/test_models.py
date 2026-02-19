@@ -37,7 +37,7 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
     #     clf = SAP_RPT_OSS_Classifier(max_context_size=8192, bagging=8)
     #     print("we are using ContextTab model")
     if model_name == 'tabdpt':
-        clf = TabDPTClassifier()
+        clf = TabDPTClassifier(device='cpu')
     if model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         clf = TabPFNClassifier(device=device)
@@ -114,16 +114,6 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
 
         # Train the model
         model = load_tabfn_model(trained_model_name, epoch, device)
-
-        #######
-
-        n_rows, n_features = X_train.shape
-        pad = 200 - n_rows  # add dummy rows to increase row count
-        if pad > 0:
-            X_train = np.vstack([X_train, np.zeros((pad, n_features), dtype=np.float32)])
-            y_train = np.concatenate([y_train, np.zeros(pad, dtype=y_train.dtype)])
-
-        #####
 
         model.fit(X_train, y_train)
 
@@ -236,7 +226,7 @@ if __name__ == '__main__':
                 th_abundance=th_abundance,
                 preprocessing=[],
                 k_fold=True, X=X, y=y,
-                device=device, n_features_max=10000
+                device=device, n_features_max=200
                 )
             results[dataset].update({epoch: result_string})
     print(results)
