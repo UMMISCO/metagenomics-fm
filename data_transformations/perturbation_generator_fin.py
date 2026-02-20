@@ -28,14 +28,14 @@ class FeatureSelector:
         self.y = y
 
     def random_forest_importance(
-            self,
-            n_estimators: int = 100,
-            max_depth: Optional[int] = None,
-            min_samples_split: int = 2,
-            min_samples_leaf: int = 1,
-            random_state: int = 42,
-            verbose: bool = True,
-            **kwargs,
+        self,
+        n_estimators: int = 100,
+        max_depth: Optional[int] = None,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
+        random_state: int = 42,
+        verbose: bool = True,
+        **kwargs,
     ) -> pd.Series:
         """Return feature importances from a Random Forest classifier."""
         from sklearn.ensemble import RandomForestClassifier
@@ -59,12 +59,12 @@ class FeatureSelector:
         ).sort_values(ascending=False)
 
     def lasso_importance(
-            self,
-            C: float = 1.0,
-            max_iter: int = 1000,
-            random_state: int = 42,
-            verbose: bool = True,
-            **kwargs,
+        self,
+        C: float = 1.0,
+        max_iter: int = 1000,
+        random_state: int = 42,
+        verbose: bool = True,
+        **kwargs,
     ) -> pd.Series:
         """Return absolute LASSO coefficients as feature importances."""
         from sklearn.linear_model import LogisticRegression
@@ -95,13 +95,13 @@ class FeatureSelector:
         return pd.Series(coefs, index=self.X.columns).sort_values(ascending=False)
 
     def select(
-            self,
-            method: str = 'random_forest',
-            n_features: Optional[int] = None,
-            threshold: Optional[float] = None,
-            return_scores: bool = False,
-            verbose: bool = True,
-            **method_kwargs,
+        self,
+        method: str = 'random_forest',
+        n_features: Optional[int] = None,
+        threshold: Optional[float] = None,
+        return_scores: bool = False,
+        verbose: bool = True,
+        **method_kwargs,
     ) -> Union[List[str], Tuple[List[str], pd.Series]]:
         """
         Select features by importance.
@@ -210,13 +210,13 @@ class RemoveFeaturesPerturbation(Perturbation):
     }
 
     def apply(
-            self,
-            X: pd.DataFrame,
-            k: Optional[int] = None,
-            features_to_remove: Optional[List[str]] = None,
-            selection_method: str = 'random',
-            seed: Optional[int] = None,
-            verbose: bool = True,
+        self,
+        X: pd.DataFrame,
+        k: Optional[int] = None,
+        features_to_remove: Optional[List[str]] = None,
+        selection_method: str = 'random',
+        seed: Optional[int] = None,
+        verbose: bool = True,
     ) -> pd.DataFrame:
         """
         Parameters
@@ -275,10 +275,10 @@ class RemoveFeaturesPerturbation(Perturbation):
         return self._remove_and_renormalize(X, to_remove, verbose)
 
     def _remove_and_renormalize(
-            self,
-            X: pd.DataFrame,
-            features_to_remove: List[str],
-            verbose: bool,
+        self,
+        X: pd.DataFrame,
+        features_to_remove: List[str],
+        verbose: bool,
     ) -> pd.DataFrame:
         keep = [c for c in X.columns if c not in features_to_remove]
         if verbose:
@@ -295,14 +295,14 @@ class AddRandomFeaturesPerturbation(Perturbation):
     """
 
     def apply(
-            self,
-            X: pd.DataFrame,
-            k: Optional[int] = None,
-            min_abundance: float = 1e-4,
-            max_abundance: float = 1e-3,
-            feature_prefix: str = 'random_feature',
-            seed: Optional[int] = None,
-            verbose: bool = True,
+        self,
+        X: pd.DataFrame,
+        k: Optional[int] = None,
+        min_abundance: float = 1e-4,
+        max_abundance: float = 1e-3,
+        feature_prefix: str = 'random_feature',
+        seed: Optional[int] = None,
+        verbose: bool = True,
     ) -> pd.DataFrame:
         """
         Parameters
@@ -339,8 +339,8 @@ class AddRandomFeaturesPerturbation(Perturbation):
         if verbose:
             print(f"  Added {k} random features. Shape: {X.shape} → {X_aug.shape}")
             in_range = (
-                               (random_abundances >= min_abundance) & (random_abundances <= max_abundance)
-                       ).mean() * 100
+                (random_abundances >= min_abundance) & (random_abundances <= max_abundance)
+            ).mean() * 100
             print(f"  Values in target range [{min_abundance:.1e}, {max_abundance:.1e}]: {in_range:.1f}%")
 
         return X_aug
@@ -353,12 +353,12 @@ class SparsityPerturbation(Perturbation):
     """
 
     def apply(
-            self,
-            X: pd.DataFrame,
-            target_sparsity: float = 0.5,
-            noise_range: Tuple[float, float] = (1e-6, 1e-4),
-            seed: Optional[int] = None,
-            verbose: bool = True,
+        self,
+        X: pd.DataFrame,
+        target_sparsity: float = 0.5,
+        noise_range: Tuple[float, float] = (1e-6, 1e-4),
+        seed: Optional[int] = None,
+        verbose: bool = True,
     ) -> pd.DataFrame:
         """
         Parameters
@@ -396,12 +396,12 @@ class SparsityPerturbation(Perturbation):
         return X
 
     def _add_exact_zeros(
-            self,
-            X: pd.DataFrame,
-            num_zeros: int,
-            threshold: float = 1e-6,
-            seed: Optional[int] = None,
-            verbose: bool = False,
+        self,
+        X: pd.DataFrame,
+        num_zeros: int,
+        threshold: float = 1e-6,
+        seed: Optional[int] = None,
+        verbose: bool = False,
     ) -> pd.DataFrame:
         """Binary-search for a power-transform gamma that creates exactly `num_zeros` new zeros."""
         modifiable = self._modifiable(X)
@@ -448,12 +448,12 @@ class SparsityPerturbation(Perturbation):
         return self._renormalize(X_t, verbose)
 
     def _fill_exact_zeros(
-            self,
-            X: pd.DataFrame,
-            num_zeros: int,
-            noise_range: Tuple[float, float] = (1e-6, 1e-4),
-            seed: Optional[int] = None,
-            verbose: bool = False,
+        self,
+        X: pd.DataFrame,
+        num_zeros: int,
+        noise_range: Tuple[float, float] = (1e-6, 1e-4),
+        seed: Optional[int] = None,
+        verbose: bool = False,
     ) -> pd.DataFrame:
         """Fill exactly `num_zeros` zeros in modifiable features with small random noise."""
         modifiable = self._modifiable(X)
@@ -537,8 +537,8 @@ class PerturbationStats:
         return row
 
     def compute_all(
-            self,
-            datasets: List[Tuple[str, pd.DataFrame, Optional[dict]]],
+        self,
+        datasets: List[Tuple[str, pd.DataFrame, Optional[dict]]],
     ) -> pd.DataFrame:
         """
         Parameters
@@ -561,8 +561,8 @@ class PerturbationVisualizer:
 
     @staticmethod
     def _paired_vals(
-            original: pd.DataFrame,
-            X_pert: pd.DataFrame,
+        original: pd.DataFrame,
+        X_pert: pd.DataFrame,
     ) -> Tuple[np.ndarray, np.ndarray, List[str]]:
         """Return (x_vals, y_vals, shared_cols) aligned by sorted shared columns."""
         shared_cols = sorted(original.columns.intersection(X_pert.columns))
@@ -574,12 +574,12 @@ class PerturbationVisualizer:
     # Plot 1: one subplot per perturbation
     # ------------------------------------------------------------------
     def plot_per_perturbation(
-            self,
-            original: pd.DataFrame,
-            perturbations: List[Tuple[str, pd.DataFrame]],
-            subplot_size: Tuple[int, int] = (5, 5),
-            save_path: Optional[str] = None,
-            title: Optional[str] = None,
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        subplot_size: Tuple[int, int] = (5, 5),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
         """One subplot per perturbation. x = original value, y = perturbed value.
         Total points per panel = n_samples × n_shared_features."""
@@ -624,12 +624,12 @@ class PerturbationVisualizer:
     # Plot 2: all perturbations overlaid, colour = perturbation level
     # ------------------------------------------------------------------
     def plot_overlay(
-            self,
-            original: pd.DataFrame,
-            perturbations: List[Tuple[str, pd.DataFrame]],
-            figsize: Tuple[int, int] = (8, 7),
-            save_path: Optional[str] = None,
-            title: Optional[str] = None,
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        figsize: Tuple[int, int] = (8, 7),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
         """All perturbations overlaid. Colour = perturbation level.
         Total points per layer = n_samples × n_shared_features."""
@@ -664,14 +664,14 @@ class PerturbationVisualizer:
     # Plot 3: colour = sample class, black ring = protected feature
     # ------------------------------------------------------------------
     def plot_class_and_protected(
-            self,
-            original: pd.DataFrame,
-            perturbations: List[Tuple[str, pd.DataFrame]],
-            y_labels: pd.Series,
-            protected_features: List[str],
-            subplot_size: Tuple[int, int] = (6, 6),
-            save_path: Optional[str] = None,
-            title: Optional[str] = None,
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        y_labels: pd.Series,
+        protected_features: List[str],
+        subplot_size: Tuple[int, int] = (6, 6),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
         """One subplot per perturbation.
         Colour = sample class label (repeated per feature).
@@ -739,13 +739,13 @@ class PerturbationVisualizer:
     # Plot 4: distribution of (perturbed - original) split by class
     # ------------------------------------------------------------------
     def plot_delta_by_class(
-            self,
-            original: pd.DataFrame,
-            perturbations: List[Tuple[str, pd.DataFrame]],
-            y_labels: pd.Series,
-            figsize: Tuple[int, int] = (12, 5),
-            save_path: Optional[str] = None,
-            title: Optional[str] = None,
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        y_labels: pd.Series,
+        figsize: Tuple[int, int] = (12, 5),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
         """
         Boxplot of (perturbed - original) per (perturbation level x class).
@@ -809,99 +809,95 @@ class PerturbationVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
+
     # ------------------------------------------------------------------
     # Plot 5: per-class feature trajectory across perturbation levels
     # ------------------------------------------------------------------
     def plot_feature_trajectories(
-            self,
-            original: pd.DataFrame,
-            perturbations: List[Tuple[str, pd.DataFrame]],
-            y_labels: pd.Series,
-            protected_features: List[str],
-            figsize: Tuple[int, int] = (14, 6),
-            save_path: Optional[str] = None,
-            title: Optional[str] = None,
+        self,
+        original: pd.DataFrame,
+        perturbations: List[Tuple[str, pd.DataFrame]],
+        y_labels: pd.Series,
+        protected_features: List[str],
+        figsize: Tuple[int, int] = (14, 6),
+        save_path: Optional[str] = None,
+        title: Optional[str] = None,
     ) -> None:
         """
-        One subplot per class. Each boxplot = median feature abundance at one k level.
-        Lines connect the same feature across k levels.
-        Protected features are highlighted in a distinct colour.
-        This shows whether the relative ordering of features (i.e. separability)
-        is preserved or destroyed as perturbation increases.
+        One subplot per class.
+        X-axis = perturbation level (k=0, k=10, ...).
+        Y-axis = log1p(mean abundance) of each feature for samples of that class.
+        Each dot = one feature at one k level, placed inside the boxplot with jitter.
+        Dots of the same feature are connected by a line across k levels.
+        Protected features in red, others in grey.
+        Log scale on y so low-abundance features are visible alongside high-abundance ones.
         """
         classes = sorted(y_labels.unique())
-
-        # Build all datasets including k=0 (original)
-        all_datasets = [("k=0 (original)", original)] + [(label, X) for label, X in perturbations]
-
-        # Shared features across ALL datasets
+        all_datasets = [("k=0", original)] + [(label, X) for label, X in perturbations]
         shared_cols = sorted(set.intersection(*[set(X.columns) for _, X in all_datasets]))
+        n_k = len(all_datasets)
 
         fig, axes = plt.subplots(1, len(classes), figsize=figsize, sharey=True)
         if len(classes) == 1:
             axes = [axes]
 
-        x_positions = np.arange(len(all_datasets))
+        x_positions = np.arange(n_k)
         x_labels = [label for label, _ in all_datasets]
-
-        # Colour: protected = red, others = grey
-        feature_colours = {
-            f: '#e74c3c' if f in protected_features else '#aaaaaa'
-            for f in shared_cols
-        }
-        feature_alpha = {f: 0.9 if f in protected_features else 0.3 for f in shared_cols}
-        feature_lw = {f: 1.5 if f in protected_features else 0.5 for f in shared_cols}
+        rng = np.random.default_rng(0)
 
         for ax, cls in zip(axes, classes):
-            # For each dataset, get per-feature mean across samples of this class
             sample_mask = y_labels == cls
 
-            # feature_means[feat][dataset_idx] = mean abundance of that feature for this class
-            feature_means = {}
-            for feat in shared_cols:
-                feature_means[feat] = []
-                for _, X in all_datasets:
-                    vals = X.loc[sample_mask, feat].values.astype(float)
-                    feature_means[feat].append(np.mean(vals))
+            # log1p of mean abundance per feature per k level
+            feat_matrix = np.array([
+                [np.log1p(X.loc[sample_mask, f].values.astype(float).mean())
+                 for _, X in all_datasets]
+                for f in shared_cols
+            ])  # shape: (n_features, n_k)
 
-            # Draw one line per feature
-            for feat in shared_cols:
-                ax.plot(
-                    x_positions,
-                    feature_means[feat],
-                    color=feature_colours[feat],
-                    alpha=feature_alpha[feat],
-                    linewidth=feature_lw[feat],
-                    zorder=2 if feat in protected_features else 1,
-                )
+            # --- Boxplot at each k ---
+            ax.boxplot(
+                [feat_matrix[:, k] for k in range(n_k)],
+                positions=x_positions,
+                widths=0.5,
+                patch_artist=True,
+                showfliers=False,
+                medianprops=dict(color='black', linewidth=2, zorder=5),
+                boxprops=dict(facecolor='#d5e8f7', alpha=0.5, zorder=1),
+                whiskerprops=dict(linewidth=1, zorder=1),
+                capprops=dict(linewidth=1, zorder=1),
+            )
 
-            # Overlay boxplots showing distribution across features at each k
-            for x_pos, (_, X) in zip(x_positions, all_datasets):
-                feat_means_at_k = [feature_means[f][x_pos] for f in shared_cols]
-                ax.boxplot(
-                    feat_means_at_k,
-                    positions=[x_pos],
-                    widths=0.4,
-                    patch_artist=True,
-                    showfliers=False,
-                    medianprops=dict(color='black', linewidth=2),
-                    boxprops=dict(facecolor='#d5e8f7', alpha=0.6),
-                    whiskerprops=dict(linewidth=1),
-                    capprops=dict(linewidth=1),
-                    zorder=3,
-                )
+            # --- Lines + jittered dots per feature ---
+            for f_idx, feat in enumerate(shared_cols):
+                is_protected = feat in protected_features
+                colour = '#c0392b' if is_protected else '#555555'
+                alpha  = 0.9 if is_protected else 0.6
+                lw     = 1.8 if is_protected else 0.7
+                ms     = 25  if is_protected else 14
+                zorder = 4   if is_protected else 3
 
+                y_vals = feat_matrix[f_idx]
+                jitter = rng.uniform(-0.18, 0.18, size=n_k)
+
+                # line on exact x positions
+                ax.plot(x_positions, y_vals, color=colour,
+                        alpha=alpha * 0.5, linewidth=lw, zorder=zorder)
+                # dots with jitter inside box
+                ax.scatter(x_positions + jitter, y_vals, color=colour,
+                           alpha=alpha, s=ms, zorder=zorder + 1, edgecolors='none')
+
+            ax.set_ylim(0, 0.05)
             ax.set_xticks(x_positions)
-            ax.set_xticklabels(x_labels, rotation=25, ha='right', fontsize=8)
+            ax.set_xticklabels(x_labels, rotation=25, ha='right', fontsize=7)
             ax.set_title(f"Class {cls}", fontsize=11, fontweight='bold')
             ax.set_xlabel("Perturbation level", fontsize=9)
             ax.grid(True, linestyle="--", alpha=0.3, axis='y')
 
-            # Legend on first subplot only
             if ax == axes[0]:
-                ax.set_ylabel("Mean feature abundance", fontsize=10)
-                ax.plot([], [], color='#e74c3c', linewidth=2, label='protected feature')
-                ax.plot([], [], color='#aaaaaa', linewidth=1, alpha=0.5, label='other feature')
+                ax.set_ylabel("log1p(Mean feature abundance)", fontsize=10)
+                ax.scatter([], [], color='#c0392b', s=25, label='protected feature')
+                ax.scatter([], [], color='#555555', s=14, alpha=0.7, label='other feature')
                 ax.legend(fontsize=8, frameon=True)
 
         fig.suptitle(title or "Feature trajectories across perturbation levels by class",
@@ -910,6 +906,7 @@ class PerturbationVisualizer:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
+
 
 
 # =============================================================================
@@ -931,10 +928,10 @@ class DataLoader:
     ]
 
     def load(
-            self,
-            dataset_name: str,
-            data_source: str = 'pasolli',
-            filter_params: Tuple[float, float] = (0.0, 0.0),
+        self,
+        dataset_name: str,
+        data_source: str = 'pasolli',
+        filter_params: Tuple[float, float] = (0.0, 0.0),
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """
         Load and filter a dataset.
@@ -994,18 +991,18 @@ class DataGenerator:
     """
 
     _GENERATOR_MAP = {
-        'remove_features': RemoveFeaturesPerturbation,
+        'remove_features':     RemoveFeaturesPerturbation,
         'add_random_features': AddRandomFeaturesPerturbation,
-        'sparsity': SparsityPerturbation,
+        'sparsity':            SparsityPerturbation,
     }
 
     def __init__(
-            self,
-            generator_type: str = 'sparsity',
-            data_source: str = 'pasolli',
-            dataset_name: Optional[str] = None,
-            filter_params: Optional[Tuple[float, float]] = None,
-            protected_features: Optional[List[str]] = None,
+        self,
+        generator_type: str = 'sparsity',
+        data_source: str = 'pasolli',
+        dataset_name: Optional[str] = None,
+        filter_params: Optional[Tuple[float, float]] = None,
+        protected_features: Optional[List[str]] = None,
     ):
         if generator_type not in self._GENERATOR_MAP and generator_type != 'identity':
             raise ValueError(
@@ -1042,9 +1039,9 @@ class DataGenerator:
     # Data loading
     # ------------------------------------------------------------------
     def load_data(
-            self,
-            dataset_name: Optional[str] = None,
-            filter_params: Optional[Tuple[float, float]] = None,
+        self,
+        dataset_name: Optional[str] = None,
+        filter_params: Optional[Tuple[float, float]] = None,
     ) -> Tuple[pd.DataFrame, pd.Series]:
         """Load and store the dataset. Returns (X, y)."""
         dataset_name = dataset_name or self.dataset_name
@@ -1067,13 +1064,13 @@ class DataGenerator:
     # Feature discovery / protection
     # ------------------------------------------------------------------
     def discover_informative_features(
-            self,
-            method: str = 'random_forest',
-            n_features: Optional[int] = None,
-            threshold: Optional[float] = None,
-            return_scores: bool = False,
-            verbose: bool = True,
-            **method_kwargs,
+        self,
+        method: str = 'random_forest',
+        n_features: Optional[int] = None,
+        threshold: Optional[float] = None,
+        return_scores: bool = False,
+        verbose: bool = True,
+        **method_kwargs,
     ) -> Union[List[str], Tuple[List[str], pd.Series]]:
         """Delegate to FeatureSelector.select()."""
         self._require_data()
@@ -1087,11 +1084,11 @@ class DataGenerator:
         )
 
     def discover_and_protect(
-            self,
-            method: str = 'random_forest',
-            n_features: int = 20,
-            verbose: bool = True,
-            **kwargs,
+        self,
+        method: str = 'random_forest',
+        n_features: int = 20,
+        verbose: bool = True,
+        **kwargs,
     ) -> List[str]:
         """Discover top features and mark them as protected from perturbation."""
         self._require_data()
@@ -1106,9 +1103,9 @@ class DataGenerator:
     # Generation
     # ------------------------------------------------------------------
     def generate(
-            self,
-            X: Optional[pd.DataFrame] = None,
-            **params,
+        self,
+        X: Optional[pd.DataFrame] = None,
+        **params,
     ) -> pd.DataFrame:
         """
         Apply the configured perturbation to X (defaults to X_original).
@@ -1127,10 +1124,10 @@ class DataGenerator:
     # Visualization
     # ------------------------------------------------------------------
     def visualize_perturbations(
-            self,
-            perturbation_params: List[dict],
-            subplot_size: Tuple[int, int] = (5, 5),
-            save_path: Optional[str] = None,
+        self,
+        perturbation_params: List[dict],
+        subplot_size: Tuple[int, int] = (5, 5),
+        save_path: Optional[str] = None,
     ) -> None:
         """
         Produces three plots:
@@ -1208,10 +1205,10 @@ class DataGenerator:
     # Statistics comparison
     # ------------------------------------------------------------------
     def compare_perturbation_statistics(
-            self,
-            perturbation_params: List[dict],
-            metrics: Optional[List[str]] = None,
-            figsize: Tuple[int, int] = (14, 4),
+        self,
+        perturbation_params: List[dict],
+        metrics: Optional[List[str]] = None,
+        figsize: Tuple[int, int] = (14, 4),
     ) -> pd.DataFrame:
         """
         Compute and plot statistics across perturbation levels.
@@ -1287,20 +1284,20 @@ protected = gen.discover_and_protect(method='random_forest', n_features=20)
 #    Points on the diagonal = no change
 gen.visualize_perturbations(
     perturbation_params=[
-        {'k': 10, 'selection_method': 'highest_abundance', 'seed': 42},
-        {'k': 50, 'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 10,  'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 50,  'selection_method': 'highest_abundance', 'seed': 42},
         {'k': 100, 'selection_method': 'highest_abundance', 'seed': 42},
         {'k': 200, 'selection_method': 'highest_abundance', 'seed': 42},
     ],
-    subplot_size=(5, 5),  # size of each individual subplot
+    subplot_size=(5, 5),      # size of each individual subplot
     save_path='perturbation_scatter.png',  # optional
 )
 
 # 5. Summary statistics across the same perturbation levels
 stats = gen.compare_perturbation_statistics(
     perturbation_params=[
-        {'k': 10, 'seed': 42},
-        {'k': 50, 'seed': 42},
+        {'k': 10,  'seed': 42},
+        {'k': 50,  'seed': 42},
         {'k': 100, 'seed': 42},
         {'k': 200, 'seed': 42},
     ],

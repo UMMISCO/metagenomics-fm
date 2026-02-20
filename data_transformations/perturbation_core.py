@@ -1,0 +1,548 @@
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import Tuple, Optional, List, Union
+
+sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+
+from testing.testing_data.pasolli.pasolli import open_pasolli
+from testing.testing_data.metacardis.metacardis import open_metacardis
+from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
+
+# =============================================================================
+# FEATURE SELECTION MODULE
+# =============================================================================
+
+class FeatureSelector:
+    """
+    Discovers informative features using Random Forest or LASSO.
+    Operates on a fixed (X, y) pair provided at construction.
+    """
+
+    def __init__(self, X: pd.DataFrame, y: pd.Series):
+        self.X = X
+        self.y = y
+
+    def random_forest_importance(
+        self,
+        n_estimators: int = 100,
+        max_depth: Optional[int] = None,
+        min_samples_split: int = 2,
+        min_samples_leaf: int = 1,
+        random_state: int = 42,
+        verbose: bool = True,
+        **kwargs,
+    ) -> pd.Series:
+        """Return feature importances from a Random Forest classifier."""
+        from sklearn.ensemble import RandomForestClassifier
+
+        if verbose:
+            print(f"Computing Random Forest importance (n_estimators={n_estimators})...")
+
+        rf = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            min_samples_split=min_samples_split,
+            min_samples_leaf=min_samples_leaf,
+            random_state=random_state,
+            n_jobs=-1,
+            **kwargs,
+        )
+        rf.fit(self.X, self.y)
+
+        return pd.Series(
+            rf.feature_importances_, index=self.X.columns
+        ).sort_values(ascending=False)
+
+    def lasso_importance(
+        self,
+        C: float = 1.0,
+        max_iter: int = 1000,
+        random_state: int = 42,
+        verbose: bool = True,
+        **kwargs,
+    ) -> pd.Series:
+        """Return absolute LASSO coefficients as feature importances."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.preprocessing import StandardScaler
+
+        if verbose:
+            print(f"Computing LASSO importance (C={C})...")
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(self.X)
+
+        lasso = LogisticRegression(
+            penalty='l1',
+            solver='liblinear',
+            C=C,
+            max_iter=max_iter,
+            random_state=random_state,
+            **kwargs,
+        )
+        lasso.fit(X_scaled, self.y)
+
+        # Binary: coef_[0]; multi-class: max absolute coef across classes
+        if len(np.unique(self.y)) == 2:
+            coefs = np.abs(lasso.coef_[0])
+        else:
+            coefs = np.abs(lasso.coef_).max(axis=0)
+
+        return pd.Series(coefs, index=self.X.columns).sort_values(ascending=False)
+
+    def select(
+        self,
+        method: str = 'random_forest',
+        n_features: Optional[int] = None,
+        threshold: Optional[float] = None,
+        return_scores: bool = False,
+        verbose: bool = True,
+        **method_kwargs,
+    ) -> Union[List[str], Tuple[List[str], pd.Series]]:
+        """
+        Select features by importance.
+
+        Parameters
+        ----------
+        method : str
+            'random_forest' / 'rf'  or  'lasso' / 'l1'
+        n_features : int, optional
+            Return the top-N features.
+        threshold : float, optional
+            Return features whose importance exceeds this value.
+        return_scores : bool
+            If True, also return the full importance Series.
+        verbose : bool
+        **method_kwargs
+            Forwarded to the underlying importance method.
+
+        Returns
+        -------
+        List[str]  or  (List[str], pd.Series)
+        """
+        if n_features is None and threshold is None:
+            raise ValueError("Specify either n_features or threshold.")
+
+        method = method.lower()
+        if method in ('random_forest', 'rf'):
+            scores = self.random_forest_importance(verbose=verbose, **method_kwargs)
+            method_name = 'Random Forest'
+        elif method in ('lasso', 'l1'):
+            scores = self.lasso_importance(verbose=verbose, **method_kwargs)
+            method_name = 'LASSO'
+        else:
+            raise ValueError(f"Unknown method '{method}'. Use 'random_forest' or 'lasso'.")
+
+        if n_features is not None:
+            selected = scores.nlargest(n_features).index.tolist()
+        else:
+            selected = scores[scores > threshold].index.tolist()
+
+        if verbose:
+            print(f"\n{'=' * 70}")
+            print(f"INFORMATIVE FEATURES DISCOVERED: {len(selected)}")
+            print(f"{'=' * 70}")
+            print(f"Method: {method_name}")
+            criterion = f"Top {n_features}" if n_features is not None else f"Threshold > {threshold}"
+            print(f"Selection: {criterion}")
+            print(f"\nTop 10 features:")
+            for i, (feat, score) in enumerate(scores.nlargest(10).items(), 1):
+                feat_display = feat[:50] + '...' if len(feat) > 50 else feat
+                print(f"  {i:2d}. {feat_display:53s} {score:.4f}")
+
+        return (selected, scores) if return_scores else selected
+
+
+# =============================================================================
+# PERTURBATION MODULE
+# =============================================================================
+
+class Perturbation:
+    """
+    Base class for individual perturbation strategies.
+    Subclasses implement `apply(X, **kwargs) -> pd.DataFrame`.
+    Protected features are never modified.
+    """
+
+    def __init__(self, protected_features: Optional[List[str]] = None):
+        self.protected_features: List[str] = protected_features or []
+
+    def _modifiable(self, X: pd.DataFrame) -> List[str]:
+        return [c for c in X.columns if c not in self.protected_features]
+
+    @staticmethod
+    def _renormalize(X: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
+        """Divide each row by its sum so rows sum to 1. Rows of all-zeros are left as-is."""
+        X = X.astype(float)
+        row_sums = X.sum(axis=1)
+        zero_rows = row_sums == 0
+        if verbose and zero_rows.any():
+            print(f"Warning: {zero_rows.sum()} samples are all-zero after perturbation.")
+        result = X.copy()
+        result.loc[~zero_rows] = X.loc[~zero_rows].div(row_sums[~zero_rows], axis=0)
+        return result
+
+    def apply(self, X: pd.DataFrame, **kwargs) -> pd.DataFrame:
+        raise NotImplementedError
+
+
+class RemoveFeaturesPerturbation(Perturbation):
+    """
+    Remove k features from compositional data and renormalize.
+    Protected features are never removed.
+
+    Selection methods
+    -----------------
+    'random'             – uniform random sample
+    'lowest_abundance'   – k features with lowest mean abundance
+    'highest_abundance'  – k features with highest mean abundance
+    'lowest_prevalence'  – k features present in fewest samples
+    'highest_prevalence' – k features present in most samples
+    """
+
+    VALID_METHODS = {
+        'random', 'lowest_abundance', 'highest_abundance',
+        'lowest_prevalence', 'highest_prevalence',
+    }
+
+    def apply(
+        self,
+        X: pd.DataFrame,
+        k: Optional[int] = None,
+        features_to_remove: Optional[List[str]] = None,
+        selection_method: str = 'random',
+        seed: Optional[int] = None,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame  – compositional data (rows sum to 1)
+        k : int           – number of features to remove
+        features_to_remove : list of str, optional
+            Explicit list of features to remove (overrides k / selection_method)
+        selection_method : str
+        seed : int, optional
+        verbose : bool
+        """
+        X = X.copy()
+        modifiable = self._modifiable(X)
+
+        if verbose and self.protected_features:
+            print(f"  Protected features : {len(self.protected_features)}")
+            print(f"  Modifiable features: {len(modifiable)}")
+
+        # Explicit list provided
+        if features_to_remove is not None:
+            bad = set(features_to_remove) & set(self.protected_features)
+            if bad:
+                raise ValueError(f"Cannot remove protected features: {bad}")
+            return self._remove_and_renormalize(X, list(features_to_remove), verbose)
+
+        # Validate k
+        if k is None:
+            raise ValueError("Provide either 'k' or 'features_to_remove'.")
+        if k > len(modifiable):
+            raise ValueError(
+                f"k={k} exceeds modifiable feature count ({len(modifiable)}); "
+                f"{len(self.protected_features)} features are protected."
+            )
+        if selection_method not in self.VALID_METHODS:
+            raise ValueError(
+                f"Unknown selection_method '{selection_method}'. "
+                f"Choose from {self.VALID_METHODS}."
+            )
+
+        rng = np.random.default_rng(seed)
+
+        X_mod = X[modifiable].astype(float)
+
+        if selection_method == 'random':
+            to_remove = rng.choice(modifiable, size=k, replace=False).tolist()
+        elif selection_method == 'lowest_abundance':
+            to_remove = X_mod.mean().nsmallest(k).index.tolist()
+        elif selection_method == 'highest_abundance':
+            to_remove = X_mod.mean().nlargest(k).index.tolist()
+        elif selection_method == 'lowest_prevalence':
+            to_remove = (X_mod > 0).sum().nsmallest(k).index.tolist()
+        elif selection_method == 'highest_prevalence':
+            to_remove = (X_mod > 0).sum().nlargest(k).index.tolist()
+
+        return self._remove_and_renormalize(X, to_remove, verbose)
+
+    def _remove_and_renormalize(
+        self,
+        X: pd.DataFrame,
+        features_to_remove: List[str],
+        verbose: bool,
+    ) -> pd.DataFrame:
+        keep = [c for c in X.columns if c not in features_to_remove]
+        if verbose:
+            print(f"  Removing {len(features_to_remove)} features → {len(keep)} remaining.")
+            if self.protected_features:
+                n_protected_kept = len(set(keep) & set(self.protected_features))
+                print(f"  Protected features kept: {n_protected_kept}/{len(self.protected_features)}")
+        return self._renormalize(X[keep], verbose)
+
+
+class AddRandomFeaturesPerturbation(Perturbation):
+    """
+    Add k synthetic features drawn from a log-normal distribution and renormalize.
+    """
+
+    def apply(
+        self,
+        X: pd.DataFrame,
+        k: Optional[int] = None,
+        min_abundance: float = 1e-4,
+        max_abundance: float = 1e-3,
+        feature_prefix: str = 'random_feature',
+        seed: Optional[int] = None,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame  – compositional data
+        k : int           – number of synthetic features to add
+        min_abundance, max_abundance : float
+            95 % of samples will fall within this range (log-normal parametrisation).
+        feature_prefix : str
+        seed : int, optional
+        verbose : bool
+        """
+        if k is None:
+            raise ValueError("'k' (number of features to add) must be provided.")
+        if min_abundance >= max_abundance:
+            raise ValueError("min_abundance must be strictly less than max_abundance.")
+
+        rng = np.random.default_rng(seed)
+        X = X.copy()
+
+        log_min, log_max = np.log(min_abundance), np.log(max_abundance)
+        log_mean = (log_min + log_max) / 2
+        log_std = (log_max - log_min) / 4  # ±2σ covers the range
+
+        random_abundances = rng.lognormal(
+            mean=log_mean, sigma=log_std, size=(X.shape[0], k)
+        )
+        new_cols = [f"{feature_prefix}_{i + 1}" for i in range(k)]
+        new_df = pd.DataFrame(random_abundances, index=X.index, columns=new_cols)
+
+        X_aug = pd.concat([X, new_df], axis=1)
+        X_aug = self._renormalize(X_aug, verbose)
+
+        if verbose:
+            print(f"  Added {k} random features. Shape: {X.shape} → {X_aug.shape}")
+            in_range = (
+                (random_abundances >= min_abundance) & (random_abundances <= max_abundance)
+            ).mean() * 100
+            print(f"  Values in target range [{min_abundance:.1e}, {max_abundance:.1e}]: {in_range:.1f}%")
+
+        return X_aug
+
+
+class SparsityPerturbation(Perturbation):
+    """
+    Adjust sparsity by adding or filling an exact number of zeros.
+    Protected features are never modified.
+    """
+
+    def apply(
+        self,
+        X: pd.DataFrame,
+        target_sparsity: float = 0.5,
+        noise_range: Tuple[float, float] = (1e-6, 1e-4),
+        seed: Optional[int] = None,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Parameters
+        ----------
+        X : pd.DataFrame     – compositional data
+        target_sparsity : float   – desired fraction of zeros (0–1)
+        noise_range : (float, float)  – range for fill noise when densifying
+        seed : int, optional
+        verbose : bool
+        """
+        X = X.copy().astype(float)
+        current_sparsity = (X == 0).sum().sum() / X.size
+        total_elements = X.size
+
+        current_zeros = int(current_sparsity * total_elements)
+        target_zeros = int(target_sparsity * total_elements)
+        delta = target_zeros - current_zeros
+
+        if verbose:
+            print(f"  Sparsity: {current_sparsity:.3f} → target {target_sparsity:.3f} (Δ {delta:+d} zeros)")
+
+        if delta == 0:
+            if verbose:
+                print("  Already at target sparsity.")
+            return X
+        elif delta > 0:
+            X = self._add_exact_zeros(X, delta, seed=seed, verbose=verbose)
+        else:
+            X = self._fill_exact_zeros(X, -delta, noise_range=noise_range, seed=seed, verbose=verbose)
+
+        final_sparsity = (X == 0).sum().sum() / X.size
+        if verbose:
+            print(f"  Final sparsity: {final_sparsity:.4f}")
+
+        return X
+
+    def _add_exact_zeros(
+        self,
+        X: pd.DataFrame,
+        num_zeros: int,
+        threshold: float = 1e-6,
+        seed: Optional[int] = None,
+        verbose: bool = False,
+    ) -> pd.DataFrame:
+        """Binary-search for a power-transform gamma that creates exactly `num_zeros` new zeros."""
+        modifiable = self._modifiable(X)
+        non_zero_count = (X[modifiable] > 0).sum().sum()
+        current_zeros = (X[modifiable] == 0).sum().sum()
+
+        if non_zero_count < num_zeros:
+            raise ValueError(
+                f"Cannot add {num_zeros} zeros; only {non_zero_count} non-zero values "
+                "available in modifiable features."
+            )
+
+        gamma_min, gamma_max = 0.0, 10.0
+        best_gamma, best_X, best_diff = None, None, float('inf')
+
+        for iteration in range(50):
+            gamma = (gamma_min + gamma_max) / 2
+
+            X_t = X.copy()
+            X_t[modifiable] = X[modifiable] ** (1 + gamma)
+            X_t.loc[:, modifiable] = X_t[modifiable].where(X_t[modifiable] >= threshold, 0.0)
+
+            new_zeros = (X_t[modifiable] == 0).sum().sum() - current_zeros
+            diff = abs(new_zeros - num_zeros)
+
+            if diff < best_diff:
+                best_diff, best_gamma, best_X = diff, gamma, X_t.copy()
+
+            if diff <= 1:
+                if verbose:
+                    print(f"  Power transform γ={gamma:.4f} → {new_zeros} new zeros (target {num_zeros})")
+                break
+
+            if new_zeros < num_zeros:
+                gamma_min = gamma
+            else:
+                gamma_max = gamma
+        else:
+            if verbose:
+                actual = (best_X[modifiable] == 0).sum().sum() - current_zeros
+                print(f"  Max iterations reached. γ={best_gamma:.4f} → {actual} new zeros (target {num_zeros})")
+            X_t = best_X
+
+        return self._renormalize(X_t, verbose)
+
+    def _fill_exact_zeros(
+        self,
+        X: pd.DataFrame,
+        num_zeros: int,
+        noise_range: Tuple[float, float] = (1e-6, 1e-4),
+        seed: Optional[int] = None,
+        verbose: bool = False,
+    ) -> pd.DataFrame:
+        """Fill exactly `num_zeros` zeros in modifiable features with small random noise."""
+        modifiable = self._modifiable(X)
+        rng = np.random.default_rng(seed)  # Respects seed; does not reset global state
+
+        # Only consider zeros in modifiable columns
+        zero_mask = X[modifiable] == 0
+        zero_positions = np.argwhere(zero_mask.values)  # (row_idx, col_idx) within modifiable slice
+
+        if len(zero_positions) < num_zeros:
+            raise ValueError(
+                f"Cannot fill {num_zeros} zeros; only {len(zero_positions)} "
+                "available in modifiable features."
+            )
+
+        chosen = rng.choice(len(zero_positions), size=num_zeros, replace=False)
+        selected = zero_positions[chosen]
+        noise = rng.uniform(noise_range[0], noise_range[1], size=num_zeros)
+
+        X = X.copy()
+        mod_col_positions = {col: i for i, col in enumerate(modifiable)}
+        for idx, (row_i, col_i) in enumerate(selected):
+            col_name = modifiable[col_i]
+            X.at[X.index[row_i], col_name] = noise[idx]
+
+        if verbose:
+            print(f"  Filled {num_zeros} zeros with noise in [{noise_range[0]:.1e}, {noise_range[1]:.1e}]")
+
+        return self._renormalize(X, verbose)
+
+
+# =============================================================================
+# STATISTICS MODULE
+# =============================================================================
+
+class PerturbationStats:
+    """
+    Computes descriptive statistics for one or more (label, DataFrame) pairs.
+    """
+
+    VALID_METRICS = {'sparsity', 'n_features', 'mean_abundance', 'median_abundance', 'diversity'}
+
+    def __init__(self, metrics: Optional[List[str]] = None):
+        metrics = metrics or ['sparsity', 'n_features', 'mean_abundance', 'diversity']
+        unknown = set(metrics) - self.VALID_METRICS
+        if unknown:
+            raise ValueError(f"Unknown metrics: {unknown}. Choose from {self.VALID_METRICS}.")
+        self.metrics = metrics
+
+    def compute(self, X: pd.DataFrame, label: str, extra: Optional[dict] = None) -> dict:
+        """Return a stats dict for a single dataset."""
+        from scipy.stats import entropy
+
+        row = {'label': label}
+        if extra:
+            row.update(extra)
+
+        if 'sparsity' in self.metrics:
+            row['sparsity'] = (X == 0).sum().sum() / X.size
+
+        if 'n_features' in self.metrics:
+            # Number of features with at least one non-zero value across samples
+            row['n_features'] = (X > 0).any(axis=0).sum()
+
+        if 'mean_abundance' in self.metrics:
+            row['mean_abundance'] = X.mean().mean()
+
+        if 'median_abundance' in self.metrics:
+            row['median_abundance'] = X.median().median()
+
+        if 'diversity' in self.metrics:
+            diversities = []
+            for _, row_ in X.iterrows():
+                # Ensure numeric dtype and filter positives
+                row_vals = pd.to_numeric(row_, errors='coerce').fillna(0.0).values
+                row_nonzero = row_vals[row_vals > 0]
+                if len(row_nonzero) > 0:
+                    diversities.append(entropy(row_nonzero))
+            row['diversity'] = float(np.mean(diversities)) if diversities else 0.0
+
+        return row
+
+    def compute_all(
+        self,
+        datasets: List[Tuple[str, pd.DataFrame, Optional[dict]]],
+    ) -> pd.DataFrame:
+        """
+        Parameters
+        ----------
+        datasets : list of (label, X, extra_params_dict)
+        """
+        return pd.DataFrame([self.compute(X, label, extra) for label, X, extra in datasets])
+
+
