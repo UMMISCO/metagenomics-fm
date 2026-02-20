@@ -11,8 +11,8 @@ from testing.testing_data.pasolli.pasolli import open_pasolli
 from testing.testing_data.metacardis.metacardis import open_metacardis
 from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
 
-from perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, AddRandomFeaturesPerturbation, SparsityPerturbation, PerturbationStats
-from visualizer import PerturbationVisualizer
+from data_transformations.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, AddRandomFeaturesPerturbation, SparsityPerturbation, PerturbationStats
+from data_transformations.visualizer import PerturbationVisualizer
 
 # =============================================================================
 # DATA LOADER
@@ -360,11 +360,116 @@ class DataGenerator:
 
         return stats_df
 
+
+    # ------------------------------------------------------------------
+    # Classification performance vs perturbation level
+    # ------------------------------------------------------------------
+    def evaluate_classifier_performance(
+        self,
+        perturbation_params: List[dict],
+        cv: int = 5,
+        random_state: int = 42,
+        figsize: Tuple[int, int] = (10, 5),
+        save_path: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        For each perturbation level, train a classifier on the perturbed data
+        and measure cross-validated accuracy and ROC-AUC.
+        Produces a line plot: perturbation level → performance.
+
+        Parameters
+        ----------
+        perturbation_params : list of dict, each forwarded to generate()
+        classifier          : 'random_forest' or 'logistic'
+        cv                  : number of cross-validation folds
+        random_state        : random seed
+        figsize             : figure size
+        save_path           : optional path to save the figure
+
+        Returns
+        -------
+        pd.DataFrame with one row per perturbation level (+ original)
+        """
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.model_selection import cross_validate
+
+        self._require_data()
+
+        clf = RandomForestClassifier(n_estimators=100, random_state=random_state, n_jobs=-1)
+
+        def _evaluate(X, label):
+            scores = cross_validate(clf, X, self.y_original, cv=cv,
+                                    scoring=['accuracy', 'roc_auc'],
+                                    return_train_score=False)
+            sparsity = (X == 0).sum().sum() / X.size
+            return {
+                'label':        label,
+                'sparsity':     round(sparsity, 4),
+                'accuracy_mean': round(scores['test_accuracy'].mean(), 4),
+                'accuracy_std':  round(scores['test_accuracy'].std(), 4),
+                'roc_auc_mean':  round(scores['test_roc_auc'].mean(), 4),
+                'roc_auc_std':   round(scores['test_roc_auc'].std(), 4),
+            }
+
+        rows = [_evaluate(self.X_original, 'Original')]
+        print(f"Evaluating classifier on original + {len(perturbation_params)} perturbations...")
+
+        for i, params in enumerate(perturbation_params, 1):
+            param_str = ', '.join(f"{k}={v}" for k, v in params.items())
+            print(f"  [{i}/{len(perturbation_params)}] {param_str}")
+            X_pert = self.generate(**params)
+            rows.append(_evaluate(X_pert, f"Pert {i}: {param_str}"))
+
+        results_df = pd.DataFrame(rows)
+
+        # --- Plot ---
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+        x = np.arange(len(results_df))
+
+        for ax, metric, colour in zip(
+            axes,
+            ['accuracy', 'roc_auc'],
+            ['#2ecc71', '#3498db'],
+        ):
+            means = results_df[f'{metric}_mean'].values
+            stds  = results_df[f'{metric}_std'].values
+
+            ax.plot(x, means, marker='o', linewidth=2, color=colour)
+            ax.fill_between(x, means - stds, means + stds,
+                            alpha=0.2, color=colour, label=f'±1 std')
+            ax.axhline(means[0], color='black', linewidth=1,
+                       linestyle='--', label='original baseline')
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(results_df['label'], rotation=25, ha='right', fontsize=7)
+            ax.set_ylabel(metric.replace('_', ' ').title(), fontsize=10)
+            ax.set_title(metric.replace('_', ' ').title(), fontsize=11, fontweight='bold')
+            ax.set_ylim(0, 1.05)
+            ax.grid(True, linestyle='--', alpha=0.3)
+            ax.legend(fontsize=8)
+
+            # Annotate sparsity on x-axis
+            for xi, row in zip(x, results_df.itertuples()):
+                ax.annotate(f"s={row.sparsity:.2f}",
+                            xy=(xi, 0.01), xycoords=('data', 'axes fraction'),
+                            ha='center', fontsize=6, color='grey')
+
+        fig.suptitle(
+            f'Classifier performance vs perturbation — {self.generator_type}, RF, {cv}-fold CV',
+            fontsize=12, fontweight='bold',
+        )
+        plt.tight_layout()
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.show()
+
+        print("\nResults:")
+        print(results_df.to_string(index=False))
+        return results_df
+
     # ------------------------------------------------------------------
     # Internal guards
     # ------------------------------------------------------------------
     def _require_data(self) -> None:
         if self.X_original is None or self.y_original is None:
             raise RuntimeError("No data loaded. Call load_data() first.")
-
-

@@ -552,6 +552,23 @@ class PerturbationStats:
 # VISUALIZATION MODULE
 # =============================================================================
 
+import sys
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from typing import Tuple, Optional, List, Union
+
+sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+
+from testing.testing_data.pasolli.pasolli import open_pasolli
+from testing.testing_data.metacardis.metacardis import open_metacardis
+from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
+
+# =============================================================================
+# VISUALIZATION MODULE
+# =============================================================================
+
 class PerturbationVisualizer:
     """
     Three scatter plots for perturbation analysis.
@@ -826,11 +843,11 @@ class PerturbationVisualizer:
         """
         One subplot per class.
         X-axis = perturbation level (k=0, k=10, ...).
-        Y-axis = log1p(mean abundance) of each feature for samples of that class.
+        Y-axis = mean abundance of each feature for samples of that class.
         Each dot = one feature at one k level, placed inside the boxplot with jitter.
         Dots of the same feature are connected by a line across k levels.
         Protected features in red, others in grey.
-        Log scale on y so low-abundance features are visible alongside high-abundance ones.
+        Y-axis capped at 0.02 to show low-abundance features clearly.
         """
         classes = sorted(y_labels.unique())
         all_datasets = [("k=0", original)] + [(label, X) for label, X in perturbations]
@@ -848,9 +865,9 @@ class PerturbationVisualizer:
         for ax, cls in zip(axes, classes):
             sample_mask = y_labels == cls
 
-            # log1p of mean abundance per feature per k level
+            # mean abundance per feature per k level
             feat_matrix = np.array([
-                [np.log1p(X.loc[sample_mask, f].values.astype(float).mean())
+                [X.loc[sample_mask, f].values.astype(float).mean()
                  for _, X in all_datasets]
                 for f in shared_cols
             ])  # shape: (n_features, n_k)
@@ -887,7 +904,7 @@ class PerturbationVisualizer:
                 ax.scatter(x_positions + jitter, y_vals, color=colour,
                            alpha=alpha, s=ms, zorder=zorder + 1, edgecolors='none')
 
-            ax.set_ylim(0, 0.05)
+            ax.set_yscale('symlog', linthresh=1e-4)
             ax.set_xticks(x_positions)
             ax.set_xticklabels(x_labels, rotation=25, ha='right', fontsize=7)
             ax.set_title(f"Class {cls}", fontsize=11, fontweight='bold')
@@ -895,7 +912,7 @@ class PerturbationVisualizer:
             ax.grid(True, linestyle="--", alpha=0.3, axis='y')
 
             if ax == axes[0]:
-                ax.set_ylabel("log1p(Mean feature abundance)", fontsize=10)
+                ax.set_ylabel("Mean feature abundance (symlog scale)", fontsize=10)
                 ax.scatter([], [], color='#c0392b', s=25, label='protected feature')
                 ax.scatter([], [], color='#555555', s=14, alpha=0.7, label='other feature')
                 ax.legend(fontsize=8, frameon=True)
@@ -906,8 +923,6 @@ class PerturbationVisualizer:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
-
-
 
 # =============================================================================
 # DATA LOADER
