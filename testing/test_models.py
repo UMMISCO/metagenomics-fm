@@ -14,6 +14,7 @@ L.seed_everything(42)
 from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.metrics import accuracy_score, roc_auc_score
 from sklearn.feature_selection import SelectKBest, f_classif
+from sklearn.ensemble import RandomForestClassifier
 
 from testing_data.pasolli.pasolli import open_pasolli
 # from testing_data.open_ml.open_ml_dataset import open_openml
@@ -21,7 +22,7 @@ from testing_data.pasolli.pasolli import open_pasolli
 from testing_data.preprocessing.filter_or_logic import open_and_filter
 
 from tabicl import TabICLClassifier
-from tabdpt import TabDPTClassifier
+# from tabdpt import TabDPTClassifier
 # from foundation_models.src.tabicl_original.sklearn.classifier import TabICLClassifier
 # from sap_rpt_oss import SAP_RPT_OSS_Classifier
 
@@ -38,10 +39,19 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
     #     print("we are using ContextTab model")
     if model_name == 'tabdpt':
         clf = TabDPTClassifier(device='cpu')
-    if model_name == 'original_v2':
+    elif model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         clf = TabPFNClassifier(device=device)
         print("we are using TabPFNv2 model")
+    elif model_name == 'rf' or model_name == 'random_forest':
+        clf = RandomForestClassifier(
+            n_estimators=500,
+            max_depth=None,
+            class_weight="balanced",
+            n_jobs=-1,
+            random_state=42
+        )
+        print("we are using RandomForest model")
     elif model_name == 'tabicl':
         clf = TabICLClassifier(device=device)
         # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, checkpoint_version="tabicl-classifier-v1.1-0506.ckpt")
@@ -226,7 +236,7 @@ if __name__ == '__main__':
                 th_abundance=th_abundance,
                 preprocessing=[],
                 k_fold=True, X=X, y=y,
-                device=device, n_features_max=200
+                device=device, n_features_max=20000
                 )
             results[dataset].update({epoch: result_string})
     print(results)
