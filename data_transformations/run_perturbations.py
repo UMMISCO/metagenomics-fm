@@ -10,7 +10,7 @@ gen = DataGenerator(
     generator_type='remove_features',
     data_source='pasolli',
 )
-X, y = gen.load_data('abundance_ibd')
+X, y = gen.load_data('abundance_cirrhosis--stagediscovery')
 
 protected = gen.discover_and_protect(method='random_forest', n_features=20)
 
@@ -18,8 +18,8 @@ SELECTION_METHODS = [
     'random',
     'lowest_abundance',
     'highest_abundance',
-    'lowest_prevalence',
-    'highest_prevalence',
+    # 'lowest_prevalence',
+    # 'highest_prevalence',
 ]
 
 K_VALUES = [10, 50, 100, 200]
@@ -38,9 +38,10 @@ for method in SELECTION_METHODS:
     gen.evaluate_classifier_performance(perturbation_params=perturbation_params, cv=5)
 
 #%%
+# SPARSITY
 
 gen = DataGenerator(generator_type='sparsity', data_source='pasolli')
-X, y = gen.load_data('abundance_ibd')
+X, y = gen.load_data('abundance_cirrhosis--stagediscovery')
 protected = gen.discover_and_protect(method='random_forest', n_features=20)
 
 perturbation_params = [
@@ -58,14 +59,14 @@ results = gen.evaluate_classifier_performance(perturbation_params=perturbation_p
 # ADD_FEATURES perturbation
 
 gen_add = DataGenerator(generator_type='add_random_features', data_source='pasolli')
-X, y = gen_add.load_data('abundance_ibd')
+X, y = gen_add.load_data('abundance_cirrhosis--stagediscovery')
 gen_add.discover_and_protect(method='random_forest', n_features=20)
 
 add_params = [
-    {'n_features': 10,  'seed': 42},
-    {'n_features': 50,  'seed': 42},
-    {'n_features': 100, 'seed': 42},
-    {'n_features': 200, 'seed': 42},
+    {'k': 10,  'seed': 42},
+    {'k': 50,  'seed': 42},
+    {'k': 100, 'seed': 42},
+    {'k': 200, 'seed': 42},
 ]
 
 gen_add.visualize_perturbations(perturbation_params=add_params, subplot_size=(5, 5))
