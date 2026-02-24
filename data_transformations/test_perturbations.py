@@ -22,8 +22,8 @@ PERTURBATION_CONFIGS = {
     'sparsity': [
         {'target_sparsity': 0.80, 'seed': 42},
         {'target_sparsity': 0.85, 'seed': 42},
-        {'target_sparsity': 0.90, 'seed': 42},
         {'target_sparsity': 0.95, 'seed': 42},
+        {'target_sparsity': 0.98, 'seed': 42},
     ],
     'add_random_features': [
         {'k': 10,  'seed': 42},
@@ -40,7 +40,7 @@ results = bench.run(
     perturbation_configs=PERTURBATION_CONFIGS,
     model_names=['rf', 'original_v2', 'tabicl'],
     cv=5,
-    n_features_protect=20,
+    n_features_protect=15,
     n_features_max=10000,
     device='cpu',
     save_dir='benchmark_results/',
