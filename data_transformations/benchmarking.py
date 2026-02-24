@@ -126,6 +126,8 @@ class Benchmarker:
             model_names = ['rf']
         if save_dir:
             os.makedirs(save_dir, exist_ok=True)
+            for pert_type in perturbation_configs:
+                os.makedirs(os.path.join(save_dir, pert_type), exist_ok=True)
 
         all_rows = []
 
@@ -220,5 +222,5 @@ class Benchmarker:
             plt.tight_layout()
 
             if save_dir:
-                plt.savefig(os.path.join(save_dir, f'{pert_type}_performance.png'), dpi=200, bbox_inches='tight')
+                plt.savefig(os.path.join(save_dir, pert_type, f'{pert_type}_performance.png'), dpi=200, bbox_inches='tight')
             plt.show()
