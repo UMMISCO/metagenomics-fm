@@ -18,12 +18,16 @@ PERTURBATION_CONFIGS = {
         {'k': 50,  'selection_method': 'highest_abundance', 'seed': 42},
         {'k': 100, 'selection_method': 'highest_abundance', 'seed': 42},
         {'k': 200, 'selection_method': 'highest_abundance', 'seed': 42},
+        {'k': 10,  'selection_method': 'random', 'seed': 42},
+        {'k': 50,  'selection_method': 'random', 'seed': 42},
+        {'k': 100, 'selection_method': 'random', 'seed': 42},
+        {'k': 200, 'selection_method': 'random', 'seed': 42},
     ],
     'sparsity': [
         {'target_sparsity': 0.80, 'seed': 42},
         {'target_sparsity': 0.85, 'seed': 42},
+        {'target_sparsity': 0.90, 'seed': 42},
         {'target_sparsity': 0.95, 'seed': 42},
-        {'target_sparsity': 0.98, 'seed': 42},
     ],
     'add_random_features': [
         {'k': 10,  'seed': 42},
