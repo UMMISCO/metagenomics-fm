@@ -71,3 +71,59 @@ add_params = [
 
 gen_add.visualize_perturbations(perturbation_params=add_params, subplot_size=(5, 5))
 gen_add.evaluate_classifier_performance(perturbation_params=add_params, cv=5)
+
+#%%
+# WILCOXON TEST — degradation significance across perturbation levels
+
+from scipy.stats import wilcoxon
+import pandas as pd
+import numpy as np
+
+def wilcoxon_degradation(results_df: pd.DataFrame, metric: str = 'roc_auc_mean') -> pd.DataFrame:
+    """
+    For each perturbation method, test whether performance on perturbed data
+    is significantly different from original using Wilcoxon signed-rank test.
+    Compares original vs each perturbation level across datasets (one value per dataset = one fold mean).
+    """
+    rows = []
+    original_mask = results_df['label'] == 'Original'
+    original_vals = results_df[original_mask][metric].values
+
+    for label in results_df[~original_mask]['label'].unique():
+        pert_vals = results_df[results_df['label'] == label][metric].values
+
+        if len(pert_vals) < 2 or len(original_vals) != len(pert_vals):
+            continue
+
+        stat, p = wilcoxon(original_vals, pert_vals, alternative='greater')
+        rows.append({
+            'perturbation': label,
+            'original_mean': round(float(np.mean(original_vals)), 4),
+            'perturbed_mean': round(float(np.mean(pert_vals)), 4),
+            'delta': round(float(np.mean(original_vals) - np.mean(pert_vals)), 4),
+            'wilcoxon_stat': round(float(stat), 4),
+            'p_value': round(float(p), 4),
+            'significant': p < 0.05,
+        })
+
+    return pd.DataFrame(rows).sort_values('p_value')
+
+
+# Run on the last results_df from evaluate_classifier_performance
+# Re-run sparsity to get a fresh results_df
+gen_w = DataGenerator(generator_type='sparsity', data_source='pasolli')
+gen_w.load_data('abundance_cirrhosis--stagediscovery')
+gen_w.discover_and_protect(method='random_forest', n_features=20)
+
+perturbation_params_w = [
+    {'target_sparsity': 0.60, 'seed': 42},
+    {'target_sparsity': 0.70, 'seed': 42},
+    {'target_sparsity': 0.85, 'seed': 42},
+    {'target_sparsity': 0.95, 'seed': 42},
+]
+
+results_w = gen_w.evaluate_classifier_performance(perturbation_params=perturbation_params_w, cv=5)
+
+print("\nWilcoxon test — is performance on perturbed data significantly lower than original?")
+wilcoxon_results = wilcoxon_degradation(results_w, metric='roc_auc_mean')
+print(wilcoxon_results.to_string(index=False))
