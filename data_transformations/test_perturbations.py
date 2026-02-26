@@ -5,6 +5,8 @@ sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_founda
 
 from data_transformations.benchmarking import Benchmarker
 
+#%%
+
 DATASETS = [
     'abundance_cirrhosis--stagediscovery',
     'abundance_cirrhosis--stagevalidation',
@@ -41,14 +43,38 @@ PERTURBATION_CONFIGS = {
 
 bench = Benchmarker(data_source='pasolli')
 
+# model_list = ['rf', 'original_v2', 'tabicl']
+model_list = ['tabicl']
+models_str = "_".join(model_list)
+
 results = bench.run(
     datasets=DATASETS,
     perturbation_configs=PERTURBATION_CONFIGS,
-    # model_names=['rf', 'original_v2', 'tabicl'],
-    model_names=['rf'],
+    model_names=model_list,
     cv=5,
     n_features_protect=15,
     n_features_max=10000,
     device='cpu',
-    save_dir='/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results/',
+    save_dir=f'/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_{models_str}/',
+)
+
+#%%
+# QUICK COMPARISON — 1 dataset, 1 perturbation, 3 models
+
+bench_quick = Benchmarker(data_source='pasolli')
+
+results_quick = bench_quick.run(
+    datasets=['abundance_ibd'],
+    perturbation_configs={
+        'sparsity': [
+            {'target_sparsity': 0.85, 'seed': 42},
+            {'target_sparsity': 0.90, 'seed': 42},
+            {'target_sparsity': 0.95, 'seed': 42},
+        ],
+    },
+    model_names=['rf', 'tabicl', 'original_v2'],
+    cv=5,
+    n_features_protect=15,
+    n_features_max=10000,
+    device='cpu',
 )

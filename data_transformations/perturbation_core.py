@@ -338,12 +338,20 @@ class AddRandomFeaturesPerturbation(Perturbation):
         return X_aug
 
 
+import numpy as np
+import pandas as pd
+from typing import Optional, Tuple
+
+
 class SparsityPerturbation(Perturbation):
     """
     Adjust sparsity by adding or filling an exact number of zeros.
     Protected features are never modified.
     """
 
+    # ------------------------------------------------------------------
+    # APPLY: main entry point
+    # ------------------------------------------------------------------
     def apply(
         self,
         X: pd.DataFrame,
@@ -352,15 +360,7 @@ class SparsityPerturbation(Perturbation):
         seed: Optional[int] = None,
         verbose: bool = True,
     ) -> pd.DataFrame:
-        """
-        Parameters
-        ----------
-        X : pd.DataFrame     – compositional data
-        target_sparsity : float   – desired fraction of zeros (0–1)
-        noise_range : (float, float)  – range for fill noise when densifying
-        seed : int, optional
-        verbose : bool
-        """
+
         X = X.copy().astype(float)
         current_sparsity = (X == 0).sum().sum() / X.size
         total_elements = X.size
@@ -372,21 +372,63 @@ class SparsityPerturbation(Perturbation):
         if verbose:
             print(f"  Sparsity: {current_sparsity:.3f} → target {target_sparsity:.3f} (Δ {delta:+d} zeros)")
 
+        modifiable = self._modifiable(X)  # uninformative features per your definition
+
+        # Count modifiable entries
+        mod_nonzeros = (X[modifiable] > 0).sum().sum()
+        mod_zeros = (X[modifiable] == 0).sum().sum()
+
+        # ===============================================================
+        # CASE 0: No change
+        # ===============================================================
         if delta == 0:
             if verbose:
                 print("  Already at target sparsity.")
             return X
-        elif delta > 0:
-            X = self._add_exact_zeros(X, delta, seed=seed, verbose=verbose)
-        else:
-            X = self._fill_exact_zeros(X, -delta, noise_range=noise_range, seed=seed, verbose=verbose)
 
+        # ===============================================================
+        # CASE 1: Need MORE zeros → ADD zeros → sparsify modifiable features
+        # ===============================================================
+        if delta > 0:
+            max_addable = mod_nonzeros
+            if delta > max_addable:
+                if verbose:
+                    print(f"  [WARN] Cannot add {delta} zeros; clipping to {max_addable}.")
+                delta = max_addable
+
+            X = self._add_exact_zeros(X, delta, seed=seed, verbose=verbose)
+
+        # ===============================================================
+        # CASE 2: Need FEWER zeros → REMOVE zeros → densify modifiable features
+        # ===============================================================
+        else:
+            need_to_fill = -delta
+            max_fillable = mod_zeros
+
+            if need_to_fill > max_fillable:
+                if verbose:
+                    print(f"  [WARN] Cannot fill {need_to_fill} zeros; clipping to {max_fillable}.")
+                need_to_fill = max_fillable
+
+            X = self._fill_exact_zeros(
+                X, need_to_fill,
+                noise_range=noise_range,
+                seed=seed,
+                verbose=verbose,
+            )
+
+        # ===============================================================
+        # Final report
+        # ===============================================================
         final_sparsity = (X == 0).sum().sum() / X.size
         if verbose:
             print(f"  Final sparsity: {final_sparsity:.4f}")
 
         return X
 
+    # ------------------------------------------------------------------
+    # ADD ZEROS by power transform (binary search)
+    # ------------------------------------------------------------------
     def _add_exact_zeros(
         self,
         X: pd.DataFrame,
@@ -395,16 +437,16 @@ class SparsityPerturbation(Perturbation):
         seed: Optional[int] = None,
         verbose: bool = False,
     ) -> pd.DataFrame:
-        """Binary-search for a power-transform gamma that creates exactly `num_zeros` new zeros."""
+
         modifiable = self._modifiable(X)
         non_zero_count = (X[modifiable] > 0).sum().sum()
         current_zeros = (X[modifiable] == 0).sum().sum()
 
+        # ---- Clipping instead of failing ----
         if non_zero_count < num_zeros:
-            raise ValueError(
-                f"Cannot add {num_zeros} zeros; only {non_zero_count} non-zero values "
-                "available in modifiable features."
-            )
+            if verbose:
+                print(f"[WARN] Cannot add {num_zeros} zeros; clipping to {non_zero_count}.")
+            num_zeros = non_zero_count
 
         gamma_min, gamma_max = 0.0, 10.0
         best_gamma, best_X, best_diff = None, None, float('inf')
@@ -414,11 +456,14 @@ class SparsityPerturbation(Perturbation):
 
             X_t = X.copy()
             X_t[modifiable] = X[modifiable] ** (1 + gamma)
-            X_t.loc[:, modifiable] = X_t[modifiable].where(X_t[modifiable] >= threshold, 0.0)
+            X_t.loc[:, modifiable] = X_t[modifiable].where(
+                X_t[modifiable] >= threshold, 0.0
+            )
 
             new_zeros = (X_t[modifiable] == 0).sum().sum() - current_zeros
             diff = abs(new_zeros - num_zeros)
 
+            # Track best solution
             if diff < best_diff:
                 best_diff, best_gamma, best_X = diff, gamma, X_t.copy()
 
@@ -431,6 +476,7 @@ class SparsityPerturbation(Perturbation):
                 gamma_min = gamma
             else:
                 gamma_max = gamma
+
         else:
             if verbose:
                 actual = (best_X[modifiable] == 0).sum().sum() - current_zeros
@@ -439,6 +485,9 @@ class SparsityPerturbation(Perturbation):
 
         return self._renormalize(X_t, verbose)
 
+    # ------------------------------------------------------------------
+    # FILL ZEROS with random noise
+    # ------------------------------------------------------------------
     def _fill_exact_zeros(
         self,
         X: pd.DataFrame,
@@ -447,35 +496,34 @@ class SparsityPerturbation(Perturbation):
         seed: Optional[int] = None,
         verbose: bool = False,
     ) -> pd.DataFrame:
-        """Fill exactly `num_zeros` zeros in modifiable features with small random noise."""
+
         modifiable = self._modifiable(X)
-        rng = np.random.default_rng(seed)  # Respects seed; does not reset global state
+        rng = np.random.default_rng(seed)
 
-        # Only consider zeros in modifiable columns
         zero_mask = X[modifiable] == 0
-        zero_positions = np.argwhere(zero_mask.values)  # (row_idx, col_idx) within modifiable slice
+        zero_positions = np.argwhere(zero_mask.values)
 
+        # ---- Clipping instead of failing ----
         if len(zero_positions) < num_zeros:
-            raise ValueError(
-                f"Cannot fill {num_zeros} zeros; only {len(zero_positions)} "
-                "available in modifiable features."
-            )
+            if verbose:
+                print(f"[WARN] Cannot fill {num_zeros} zeros; clipping to {len(zero_positions)}.")
+            num_zeros = len(zero_positions)
 
         chosen = rng.choice(len(zero_positions), size=num_zeros, replace=False)
         selected = zero_positions[chosen]
         noise = rng.uniform(noise_range[0], noise_range[1], size=num_zeros)
 
         X = X.copy()
-        mod_col_positions = {col: i for i, col in enumerate(modifiable)}
+        mod_cols = list(modifiable)
+
         for idx, (row_i, col_i) in enumerate(selected):
-            col_name = modifiable[col_i]
+            col_name = mod_cols[col_i]
             X.at[X.index[row_i], col_name] = noise[idx]
 
         if verbose:
             print(f"  Filled {num_zeros} zeros with noise in [{noise_range[0]:.1e}, {noise_range[1]:.1e}]")
 
         return self._renormalize(X, verbose)
-
 
 # =============================================================================
 # STATISTICS MODULE
