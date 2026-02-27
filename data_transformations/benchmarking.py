@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+import pdb
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -23,7 +24,7 @@ def load_tabfn_model(model_name: str, device: str = 'cpu'):
         return RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
     elif model_name == 'tabdpt':
         from tabdpt import TabDPTClassifier
-        return TabDPTClassifier(device='cpu')
+        return TabDPTClassifier(device=device)
     elif model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         return TabPFNClassifier(device=device)
@@ -66,8 +67,8 @@ def _cv_scores(
     auroc_scores, f1_scores, prec_scores, rec_scores = [], [], [], []
 
     for train_idx, test_idx in skf.split(X, y):
-        X_train = X.iloc[train_idx].values
-        X_test  = X.iloc[test_idx].values
+        X_train = X.iloc[train_idx].values[:]
+        X_test  = X.iloc[test_idx].values[:]
         y_train = y[train_idx]
         y_test  = y[test_idx]
 
@@ -142,12 +143,39 @@ class Benchmarker:
                 gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
                 y = gen.y_original.values
 
+                # --- Adaptive parameter generation ---
+                n_samples, n_features = gen.X_original.shape
+
+                if pert_type in ('remove_features', 'add_random_features'):
+                    k_max = max(1, n_features // 2)
+                    k_step = max(1, int(np.ceil(k_max / 10)))
+                    k_values = list(range(k_step, k_max + 1, k_step))[:10]
+                    if pert_type == 'remove_features':
+                        sel_method = param_list[0].get('selection_method', 'highest_abundance')
+                        seed = param_list[0].get('seed', 42)
+                        dataset_params = [{'k': k, 'selection_method': sel_method, 'seed': seed} for k in k_values]
+                    else:
+                        seed = param_list[0].get('seed', 42)
+                        dataset_params = [{'k': k, 'seed': seed} for k in k_values]
+                    print(f"  [ADAPTIVE] {pert_type}: k={k_values[0]}..{k_values[-1]} ({len(k_values)} steps, n_features={n_features})")
+
+                elif pert_type == 'sparsity':
+                    actual_sparsity = float((gen.X_original.values == 0).mean())
+                    sparsity_values = list(np.linspace(actual_sparsity, 0.99, 5 + 1)[1:])  # exclude actual
+                    sparsity_values = [round(s, 3) for s in sparsity_values]
+                    seed = param_list[0].get('seed', 42)
+                    dataset_params = [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
+                    print(f"  [ADAPTIVE] sparsity: {sparsity_values[0]}..{sparsity_values[-1]} (actual={actual_sparsity:.3f}, 5 steps)")
+
+                else:
+                    dataset_params = param_list
+
                 for model_name in model_names:
                     print(f"    Model: {model_name}")
 
                     baseline = _cv_scores(model_name, gen.X_original, y, cv, n_features_max, device, random_state)
 
-                    for params in param_list:
+                    for params in dataset_params:
                         param_key, param_val = _param_label(params)
                         X_pert = gen.generate(**params)
                         scores = _cv_scores(model_name, X_pert, y, cv, n_features_max, device, random_state)
@@ -159,6 +187,9 @@ class Benchmarker:
                             'param_key':       param_key,
                             'param_value':     param_val,
                             'baseline_auroc':  baseline['auroc_mean'],
+                            'baseline_f1':     baseline['f1_mean'],
+                            'baseline_prec':   baseline['prec_mean'],
+                            'baseline_rec':    baseline['rec_mean'],
                         }
                         row.update(scores)
                         all_rows.append(row)

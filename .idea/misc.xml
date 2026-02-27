@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.12 (DeepMicro)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Remote 3.13 (sftp://gperciballi@hpc-cng6.ummisco.ioit:22/opt/conda/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.11.7 (sftp://gperciballi@hpc-cng4.ummisco.ioit:22/home/gperciballi/.conda/envs/lab/bin/python)" project-jdk-type="Python SDK" />
   <component name="PyPackaging">
     <option name="earlyReleasesAsUpgrades" value="true" />
   </component>
