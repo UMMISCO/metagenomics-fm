@@ -11,7 +11,7 @@ from testing.testing_data.pasolli.pasolli import open_pasolli
 from testing.testing_data.metacardis.metacardis import open_metacardis
 from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
 
-from data_transformations.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, AddRandomFeaturesPerturbation, SparsityPerturbation, PerturbationStats
+from data_transformations.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, AddRandomFeaturesPerturbation, SparsityPerturbation, DensificationPerturbation, PerturbationStats
 from data_transformations.visualizer import PerturbationVisualizer
 
 # =============================================================================
@@ -96,9 +96,9 @@ class DataGenerator:
     """
 
     _GENERATOR_MAP = {
-        'remove_features':     RemoveFeaturesPerturbation,
-        'add_random_features': AddRandomFeaturesPerturbation,
-        'sparsity':            SparsityPerturbation,
+        'remove_features':   RemoveFeaturesPerturbation,
+        'sparsity':          SparsityPerturbation,
+        'densification':     DensificationPerturbation,
     }
 
     def __init__(

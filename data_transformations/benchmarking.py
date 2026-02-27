@@ -2,7 +2,6 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-import pdb
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -143,39 +142,37 @@ class Benchmarker:
                 gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
                 y = gen.y_original.values
 
-                # --- Adaptive parameter generation ---
+                for model_name in model_names:
+                    print(f"    Model: {model_name}")
+
+                actual_sparsity = float((gen.X_original.values == 0).mean())
+                seed = param_list[0].get('seed', 42)
                 n_samples, n_features = gen.X_original.shape
 
-                if pert_type in ('remove_features', 'add_random_features'):
+                if pert_type == 'remove_features':
                     k_max = max(1, n_features // 2)
                     k_step = max(1, int(np.ceil(k_max / 10)))
                     k_values = list(range(k_step, k_max + 1, k_step))[:10]
-                    if pert_type == 'remove_features':
-                        sel_method = param_list[0].get('selection_method', 'highest_abundance')
-                        seed = param_list[0].get('seed', 42)
-                        dataset_params = [{'k': k, 'selection_method': sel_method, 'seed': seed} for k in k_values]
-                    else:
-                        seed = param_list[0].get('seed', 42)
-                        dataset_params = [{'k': k, 'seed': seed} for k in k_values]
-                    print(f"  [ADAPTIVE] {pert_type}: k={k_values[0]}..{k_values[-1]} ({len(k_values)} steps, n_features={n_features})")
+                    sel_method = param_list[0].get('selection_method', 'highest_abundance')
+                    dataset_params = [{'k': k, 'selection_method': sel_method, 'seed': seed} for k in k_values]
+                    print(f"  [ADAPTIVE] remove_features: k={k_values[0]}..{k_values[-1]} (10 steps, n_features={n_features})")
 
                 elif pert_type == 'sparsity':
-                    actual_sparsity = float((gen.X_original.values == 0).mean())
-                    sparsity_values = list(np.linspace(actual_sparsity, 0.99, 5 + 1)[1:])  # exclude actual
-                    sparsity_values = [round(s, 3) for s in sparsity_values]
-                    seed = param_list[0].get('seed', 42)
+                    sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.99, 7)[1:-1]]
                     dataset_params = [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
                     print(f"  [ADAPTIVE] sparsity: {sparsity_values[0]}..{sparsity_values[-1]} (actual={actual_sparsity:.3f}, 5 steps)")
+
+                elif pert_type == 'densification':
+                    sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.01, 7)[1:-1]]
+                    dataset_params = [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
+                    print(f"  [ADAPTIVE] densification: {sparsity_values[0]}..{sparsity_values[-1]} (actual={actual_sparsity:.3f}, 5 steps)")
 
                 else:
                     dataset_params = param_list
 
-                for model_name in model_names:
-                    print(f"    Model: {model_name}")
+                baseline = _cv_scores(model_name, gen.X_original, y, cv, n_features_max, device, random_state)
 
-                    baseline = _cv_scores(model_name, gen.X_original, y, cv, n_features_max, device, random_state)
-
-                    for params in dataset_params:
+                for params in dataset_params:
                         param_key, param_val = _param_label(params)
                         X_pert = gen.generate(**params)
                         scores = _cv_scores(model_name, X_pert, y, cv, n_features_max, device, random_state)

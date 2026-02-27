@@ -529,6 +529,91 @@ class SparsityPerturbation(Perturbation):
 # STATISTICS MODULE
 # =============================================================================
 
+# =============================================================================
+# DENSIFICATION PERTURBATION
+# =============================================================================
+
+class DensificationPerturbation(Perturbation):
+    """
+    Reduce sparsity by filling zeros in non-protected features with real values
+    sampled from the same non-protected features (cross-sample).
+
+    Biologically motivated: simulates species already present in the dataset
+    but undetected in certain samples due to sequencing depth limitations.
+    The filled values are drawn from the empirical distribution of non-zero
+    abundances of non-protected features, preserving realistic abundance ranges.
+
+    Parameters
+    ----------
+    target_sparsity : float
+        Target sparsity LOWER than current. If >= current, returns X unchanged.
+    seed : int, optional
+    verbose : bool
+    """
+
+    def apply(
+        self,
+        X: pd.DataFrame,
+        target_sparsity: float = 0.5,
+        seed: Optional[int] = None,
+        verbose: bool = True,
+    ) -> pd.DataFrame:
+
+        X = X.copy().astype(float)
+        modifiable = self._modifiable(X)
+        rng = np.random.default_rng(seed)
+
+        current_sparsity = float((X == 0).sum().sum() / X.size)
+        total_elements = X.size
+        current_zeros = int(current_sparsity * total_elements)
+        target_zeros = int(target_sparsity * total_elements)
+        need_to_fill = current_zeros - target_zeros
+
+        if verbose:
+            print(f"  Densification: sparsity {current_sparsity:.3f} → target {target_sparsity:.3f} (fill {need_to_fill} zeros)")
+
+        if need_to_fill <= 0:
+            if verbose:
+                print("  target_sparsity >= current_sparsity — no densification needed.")
+            return X
+
+        # Positions of zeros in modifiable features
+        mod_cols = list(modifiable)
+        zero_mask = X[modifiable] == 0
+        zero_positions = np.argwhere(zero_mask.values)
+
+        if len(zero_positions) < need_to_fill:
+            if verbose:
+                print(f"  [WARN] Only {len(zero_positions)} zeros available; clipping to that.")
+            need_to_fill = len(zero_positions)
+
+        # Pool of real non-zero values from non-protected features
+        nonzero_vals = X[modifiable].values.flatten()
+        nonzero_vals = nonzero_vals[nonzero_vals > 0]
+
+        if len(nonzero_vals) == 0:
+            if verbose:
+                print("  [WARN] No non-zero values in non-protected features — cannot densify.")
+            return X
+
+        # Sample positions to fill and values to use
+        chosen_pos = rng.choice(len(zero_positions), size=need_to_fill, replace=False)
+        fill_values = rng.choice(nonzero_vals, size=need_to_fill, replace=True)
+
+        for idx, pos_idx in enumerate(chosen_pos):
+            row_i, col_i = zero_positions[pos_idx]
+            col_name = mod_cols[col_i]
+            X.at[X.index[row_i], col_name] = fill_values[idx]
+
+        X = self._renormalize(X, verbose)
+        final_sparsity = float((X == 0).sum().sum() / X.size)
+        if verbose:
+            print(f"  Final sparsity: {final_sparsity:.4f}")
+
+        return X
+
+
+
 class PerturbationStats:
     """
     Computes descriptive statistics for one or more (label, DataFrame) pairs.
@@ -586,5 +671,3 @@ class PerturbationStats:
         datasets : list of (label, X, extra_params_dict)
         """
         return pd.DataFrame([self.compute(X, label, extra) for label, X, extra in datasets])
-
-
