@@ -27,10 +27,9 @@ Output structure:
 import sys
 import os
 import numpy as np
-import pandas as pd
 
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
-from data_transformations.data_generator import DataGenerator
+from data_transformations.check_data_on_fly.data_generator import DataGenerator
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
@@ -82,8 +81,6 @@ def param_to_filename(pert_type: str, params: dict) -> str:
 
 def main():
     os.makedirs(SAVE_DIR, exist_ok=True)
-    labels_dir = os.path.join(SAVE_DIR, 'labels')
-    os.makedirs(labels_dir, exist_ok=True)
 
     for dataset in DATASETS:
         print(f"\n{'='*60}\nDataset: {dataset}\n{'='*60}")
@@ -97,18 +94,16 @@ def main():
             actual_sparsity = float((gen.X_original.values == 0).mean())
             param_list      = get_params(pert_type, n_features, actual_sparsity)
 
-            # Save labels once per dataset
-            labels_path = os.path.join(labels_dir, f"{dataset}.parquet")
-            if not os.path.exists(labels_path):
-                gen.y_original.to_frame(name='label').to_parquet(labels_path)
-                print(f"  Saved labels → {labels_path}")
-
-            # Save original
+            # Save original + perturbed, each with label column included
             out_dir = os.path.join(SAVE_DIR, dataset, pert_type)
             os.makedirs(out_dir, exist_ok=True)
+
             orig_path = os.path.join(out_dir, 'original.parquet')
             if not os.path.exists(orig_path):
-                gen.X_original.to_parquet(orig_path)
+                df_orig = gen.X_original.copy()
+                df_orig['label'] = gen.y_original.values
+                df_orig.to_parquet(orig_path)
+                print(f"  Saved original → {orig_path}")
 
             print(f"  Perturbation: {pert_type} ({len(param_list)} levels)")
 
@@ -121,7 +116,9 @@ def main():
                     continue
 
                 X_pert = gen.generate(**params)
-                X_pert.to_parquet(out_path)
+                df_pert = X_pert.copy()
+                df_pert['label'] = gen.y_original.values
+                df_pert.to_parquet(out_path)
                 sparsity = float((X_pert.values == 0).mean())
                 print(f"    Saved {fname}  shape={X_pert.shape}  sparsity={sparsity:.3f}")
 

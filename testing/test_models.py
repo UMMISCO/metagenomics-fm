@@ -33,7 +33,7 @@ import pdb
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 
-def load_tabfn_model(model_name: str, epoch: int, device: str='cpu'):
+def load_tabfn_model(model_name: str, epoch: int, device: str='cuda'):
     # if model_name == "context_tab":
     #     clf = SAP_RPT_OSS_Classifier(max_context_size=8192, bagging=8)
     #     print("we are using ContextTab model")
@@ -217,6 +217,7 @@ if __name__ == '__main__':
             print(dataset)
             X, y = open_pasolli(dataset)
             th_abundance = 0.01
+
 
         # elif "metacardis" in dataset:
         #     print(dataset)

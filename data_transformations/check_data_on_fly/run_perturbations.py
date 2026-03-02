@@ -1,7 +1,7 @@
 import sys
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
 
-from data_transformations.data_generator import DataGenerator
+from data_transformations.check_data_on_fly.data_generator import DataGenerator
 
 #%%
 #REMOVE FEATURES
