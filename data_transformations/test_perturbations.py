@@ -1,11 +1,12 @@
 #%%
-
 import sys
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+import numpy as np
+import pandas as pd
 
+sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
 from data_transformations.benchmarking import Benchmarker
 
-def set_seed(n_seed: int = 6274):
+def set_seed(n_seed: int = 42):
     import random
     import torch
     random.seed(n_seed)
@@ -25,51 +26,43 @@ DATASETS = [
     'abundance_WT2D',
 ]
 
-PERTURBATION_CONFIGS = {
-    'remove_features': [
-        # K range —> max size(dataset)/2,
-        # then take a step such that size(dataset)/2 is divided by 10 (round up)
-        {'k': 10,  'selection_method': 'highest_abundance', 'seed': 42},
-        {'k': 50,  'selection_method': 'highest_abundance', 'seed': 42},
-        {'k': 100, 'selection_method': 'highest_abundance', 'seed': 42},
-        {'k': 200, 'selection_method': 'highest_abundance', 'seed': 42},
-        # {'k': 10,  'selection_method': 'random', 'seed': 42},
-        # {'k': 50,  'selection_method': 'random', 'seed': 42},
-        # {'k': 100, 'selection_method': 'random', 'seed': 42},
-        # {'k': 200, 'selection_method': 'random', 'seed': 42},
-    ],
-    'sparsity': [
-        #linspace from actual sparsity to 1 --> step=5
-        {'target_sparsity': 0.50, 'seed': 42},
-        {'target_sparsity': 0.60, 'seed': 42},
-        {'target_sparsity': 0.90, 'seed': 42},
-        {'target_sparsity': 0.95, 'seed': 42},
-    ],
-    'add_random_features': [
-        # K range —> max size(dataset)/2,
-        # then take a step such that size(dataset)/2 is divided by 10 (round up)
-        {'k': 10,  'seed': 42},
-        {'k': 50,  'seed': 42},
-        {'k': 100, 'seed': 42},
-        {'k': 200, 'seed': 42},
-    ],
-}
+PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
+
+MODEL_LIST = ['rf', 'tabicl', 'original_v2']
+
+PRECOMPUTED_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets/'
+SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results/'
 
 set_seed(42)
 
 bench = Benchmarker(data_source='pasolli')
 
-# model_list = ['rf', 'original_v2', 'tabicl']
-model_list = ['rf']
-models_str = "_".join(model_list)
+#%%
+# --- Run benchmark: one (dataset, perturbation) at a time ---
+all_results = []
 
-results = bench.run(
-    datasets=DATASETS,
-    perturbation_configs=PERTURBATION_CONFIGS,
-    model_names=model_list,
-    cv=5,
-    n_features_protect=5,
-    n_features_max=100000,
-    device='cpu',
-    # save_dir=f'/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_2f_{models_str}/',
+for dataset in DATASETS:
+    for pert_type in PERTURBATION_TYPES:
+        df = bench.run_one(
+            dataset         = dataset,
+            pert_type       = pert_type,
+            model_names     = MODEL_LIST,
+            cv              = 5,
+            n_features_protect = 2,
+            n_features_max  = 100000,
+            device          = 'cpu',
+            seed            = 42,
+            precomputed_dir = PRECOMPUTED_DIR,
+            save_dir        = SAVE_DIR,
+        )
+        all_results.append(df)
+
+#%%
+# --- Merge all results and plot ---
+results_df = pd.concat(all_results, ignore_index=True)
+
+bench.plot(
+    results_df,
+    figsize   = (8, 5),
+    save_dir  = SAVE_DIR,
 )

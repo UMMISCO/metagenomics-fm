@@ -17,6 +17,10 @@ from data_transformations.data_generator import DataGenerator
 warnings.filterwarnings('ignore')
 
 
+# =============================================================================
+# MODEL LOADING
+# =============================================================================
+
 def load_tabfn_model(model_name: str, device: str = 'cpu'):
     if model_name == 'rf':
         from sklearn.ensemble import RandomForestClassifier
@@ -34,6 +38,10 @@ def load_tabfn_model(model_name: str, device: str = 'cpu'):
         raise ValueError(f"Unknown model: {model_name}")
 
 
+# =============================================================================
+# HELPERS
+# =============================================================================
+
 def _reduce_features(X_train: np.ndarray, y_train: np.ndarray, n_features_max: int) -> np.ndarray:
     selector = SelectKBest(f_classif, k=n_features_max)
     selector.fit(X_train, y_train)
@@ -41,16 +49,36 @@ def _reduce_features(X_train: np.ndarray, y_train: np.ndarray, n_features_max: i
 
 
 def _param_label(params: dict) -> Tuple[str, str]:
-    """
-    Returns (param_key, param_val_str) for use as x-axis label.
-    For remove_features: combines k + selection_method.
-    For others: uses the first non-seed key.
-    """
+    """Returns (param_key, param_val_str) for use as axis label and filename."""
     filtered = {k: v for k, v in params.items() if k != 'seed'}
     if 'k' in filtered and 'selection_method' in filtered:
         return 'k / method', f"k={filtered['k']} / {filtered['selection_method']}"
     key = next(iter(filtered))
-    return key, filtered[key]
+    return key, str(filtered[key])
+
+
+def _params_to_filename(pert_type: str, params: dict) -> str:
+    """Convert params dict to parquet filename (must match generate_perturbed_datasets.py)."""
+    if pert_type == 'remove_features':
+        return f"k={params['k']}.parquet"
+    elif pert_type in ('sparsity', 'densification'):
+        return f"{params['target_sparsity']}.parquet"
+    return "params.parquet"
+
+
+def _adaptive_params(pert_type: str, n_features: int, actual_sparsity: float, seed: int = 42) -> List[dict]:
+    """Compute adaptive perturbation parameters for a given dataset."""
+    if pert_type == 'remove_features':
+        k_max = max(1, n_features // 2)
+        k_values = [int(k) for k in np.linspace(1, k_max, 10)]
+        return [{'k': k, 'selection_method': 'highest_abundance', 'seed': seed} for k in k_values]
+    elif pert_type == 'sparsity':
+        sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.99, 7)[1:-1]]
+        return [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
+    elif pert_type == 'densification':
+        sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.01, 7)[1:-1]]
+        return [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
+    return []
 
 
 def _cv_scores(
@@ -103,104 +131,124 @@ def _cv_scores(
     }
 
 
+# =============================================================================
+# BENCHMARKER
+# =============================================================================
+
 class Benchmarker:
 
     def __init__(self, data_source: str = 'pasolli'):
         self.data_source = data_source
 
-    def run(
+    def run_one(
         self,
-        datasets: List[str],
-        perturbation_configs: Dict[str, List[dict]],
+        dataset: str,
+        pert_type: str,
         model_names: List[str] = None,
-        cv: int = 10,
-        n_features_protect: int = 20,
-        n_features_max: int = 10000,
+        cv: int = 5,
+        n_features_protect: int = 2,
+        n_features_max: int = 100000,
         random_state: int = 42,
         device: str = 'cpu',
-        figsize: Tuple[int, int] = (8, 5),
+        seed: int = 42,
+        precomputed_dir: Optional[str] = None,
         save_dir: Optional[str] = None,
     ) -> pd.DataFrame:
+        """
+        Run benchmark for a single (dataset, perturbation_type) combination.
 
+        Parameters
+        ----------
+        dataset         : e.g. 'abundance_cirrhosis--stagediscovery'
+        pert_type       : 'remove_features' | 'sparsity' | 'densification'
+        model_names     : list of model names to evaluate
+        precomputed_dir : root dir of precomputed parquet files (from generate_perturbed_datasets.py)
+                          If None, perturbations are generated on-the-fly.
+        save_dir        : if provided, saves results as parquet to save_dir/{dataset}/{pert_type}.parquet
+        """
         if model_names is None:
             model_names = ['rf']
-        if save_dir:
-            os.makedirs(save_dir, exist_ok=True)
-            for pert_type in perturbation_configs:
-                os.makedirs(os.path.join(save_dir, pert_type), exist_ok=True)
 
-        all_rows = []
+        print(f"\n{'='*60}")
+        print(f"Dataset: {dataset}  |  Perturbation: {pert_type}")
+        print(f"{'='*60}")
 
-        for pert_type, param_list in perturbation_configs.items():
-            print(f"\n{'='*60}\nPerturbation: {pert_type}\n{'='*60}")
+        # --- Load original data ---
+        gen = DataGenerator(generator_type=pert_type, data_source=self.data_source)
+        gen.load_data(dataset)
+        gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
+        y = gen.y_original.values
 
-            for dataset in datasets:
-                print(f"  Dataset: {dataset}")
+        actual_sparsity = float((gen.X_original.values == 0).mean())
+        n_features = gen.X_original.shape[1]
+        dataset_params = _adaptive_params(pert_type, n_features, actual_sparsity, seed=seed)
+        print(f"  Adaptive params: {len(dataset_params)} levels  (sparsity={actual_sparsity:.3f}, n_features={n_features})")
 
-                gen = DataGenerator(generator_type=pert_type, data_source=self.data_source)
-                gen.load_data(dataset)
-                gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
-                y = gen.y_original.values
+        # --- Load precomputed perturbed data if available ---
+        perturbed_cache = {}  # param_val -> DataFrame
+        if precomputed_dir:
+            orig_path = os.path.join(precomputed_dir, dataset, pert_type, 'original.parquet')
+            X_original = pd.read_parquet(orig_path) if os.path.exists(orig_path) else gen.X_original
 
-                for model_name in model_names:
-                    print(f"    Model: {model_name}")
-
-                actual_sparsity = float((gen.X_original.values == 0).mean())
-                seed = param_list[0].get('seed', 42)
-                n_samples, n_features = gen.X_original.shape
-
-                if pert_type == 'remove_features':
-                    k_max = max(1, n_features // 2)
-                    k_step = max(1, int(np.ceil(k_max / 10)))
-                    k_values = list(range(k_step, k_max + 1, k_step))[:10]
-                    sel_method = param_list[0].get('selection_method', 'highest_abundance')
-                    dataset_params = [{'k': k, 'selection_method': sel_method, 'seed': seed} for k in k_values]
-                    print(f"  [ADAPTIVE] remove_features: k={k_values[0]}..{k_values[-1]} (10 steps, n_features={n_features})")
-
-                elif pert_type == 'sparsity':
-                    sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.99, 7)[1:-1]]
-                    dataset_params = [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
-                    print(f"  [ADAPTIVE] sparsity: {sparsity_values[0]}..{sparsity_values[-1]} (actual={actual_sparsity:.3f}, 5 steps)")
-
-                elif pert_type == 'densification':
-                    sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.01, 7)[1:-1]]
-                    dataset_params = [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
-                    print(f"  [ADAPTIVE] densification: {sparsity_values[0]}..{sparsity_values[-1]} (actual={actual_sparsity:.3f}, 5 steps)")
-
+            for params in dataset_params:
+                _, param_val = _param_label(params)
+                fname = _params_to_filename(pert_type, params)
+                fpath = os.path.join(precomputed_dir, dataset, pert_type, fname)
+                if os.path.exists(fpath):
+                    perturbed_cache[param_val] = pd.read_parquet(fpath)
                 else:
-                    dataset_params = param_list
+                    print(f"  [WARN] Precomputed file not found: {fpath} — will generate on-the-fly")
+        else:
+            X_original = gen.X_original
 
-                baseline = _cv_scores(model_name, gen.X_original, y, cv, n_features_max, device, random_state)
+        # --- Evaluate each model ---
+        rows = []
+        for model_name in model_names:
+            print(f"\n  Model: {model_name}")
 
-                for params in dataset_params:
-                        param_key, param_val = _param_label(params)
-                        X_pert = gen.generate(**params)
-                        scores = _cv_scores(model_name, X_pert, y, cv, n_features_max, device, random_state)
+            baseline = _cv_scores(model_name, X_original, y, cv, n_features_max, device, random_state)
+            print(f"    baseline AUROC={baseline['auroc_mean']:.3f}±{baseline['auroc_std']:.3f}")
 
-                        row = {
-                            'perturbation':    pert_type,
-                            'dataset':         dataset,
-                            'model':           model_name,
-                            'param_key':       param_key,
-                            'param_value':     param_val,
-                            'baseline_auroc':  baseline['auroc_mean'],
-                            'baseline_f1':     baseline['f1_mean'],
-                            'baseline_prec':   baseline['prec_mean'],
-                            'baseline_rec':    baseline['rec_mean'],
-                        }
-                        row.update(scores)
-                        all_rows.append(row)
-                        print(f"      {param_val} → AUROC={scores['auroc_mean']:.3f}±{scores['auroc_std']:.3f}  F1={scores['f1_mean']:.3f}")
+            for params in dataset_params:
+                param_key, param_val = _param_label(params)
 
-        results_df = pd.DataFrame(all_rows)
-        self._plot_and_save(results_df, perturbation_configs, figsize, save_dir)
+                X_pert = perturbed_cache.get(param_val) or gen.generate(**params)
 
+                scores = _cv_scores(model_name, X_pert, y, cv, n_features_max, device, random_state)
+                print(f"    {param_val:35s} AUROC={scores['auroc_mean']:.3f}±{scores['auroc_std']:.3f}  F1={scores['f1_mean']:.3f}")
+
+                rows.append({
+                    'perturbation':  pert_type,
+                    'dataset':       dataset,
+                    'model':         model_name,
+                    'param_key':     param_key,
+                    'param_value':   param_val,
+                    'baseline_auroc': baseline['auroc_mean'],
+                    'baseline_f1':   baseline['f1_mean'],
+                    'baseline_prec': baseline['prec_mean'],
+                    'baseline_rec':  baseline['rec_mean'],
+                    **scores,
+                })
+
+        results_df = pd.DataFrame(rows)
+
+        # --- Save results ---
         if save_dir:
-            results_df.to_csv(os.path.join(save_dir, 'benchmark_results.csv'), index=False)
+            out_dir = os.path.join(save_dir, dataset)
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"{pert_type}.parquet")
+            results_df.to_parquet(out_path, index=False)
+            print(f"\n  Saved → {out_path}")
 
         return results_df
 
-    def _plot_and_save(self, results_df, perturbation_configs, figsize, save_dir):
+    def plot(
+        self,
+        results_df: pd.DataFrame,
+        figsize: Tuple[int, int] = (8, 5),
+        save_dir: Optional[str] = None,
+    ) -> None:
+        """Plot results from a results DataFrame (can be merged from multiple run_one calls)."""
         metrics = [
             ('auroc_mean', 'auroc_std', 'AUROC'),
             ('f1_mean',    'f1_std',    'F1'),
@@ -213,7 +261,7 @@ class Benchmarker:
         palette       = sns.color_palette('tab10', len(dataset_names))
         linestyles    = ['-', '--', ':', '-.']
 
-        for pert_type in perturbation_configs:
+        for pert_type in results_df['perturbation'].unique():
             df_pert = results_df[results_df['perturbation'] == pert_type]
 
             fig, axes = plt.subplots(1, len(metrics), figsize=(figsize[0] * len(metrics), figsize[1]))
@@ -238,8 +286,10 @@ class Benchmarker:
                                         sub[mean_col] + sub[std_col],
                                         alpha=0.1, color=palette[d_idx])
 
-                ax.set_xticks(range(len(df_pert['param_value'].unique())))
-                ax.set_xticklabels(df_pert['param_value'].unique(), rotation=30, ha='right', fontsize=7)
+                seen = set()
+                ordered_params = [x for x in df_pert['param_value'].tolist() if not (x in seen or seen.add(x))]
+                ax.set_xticks(range(len(ordered_params)))
+                ax.set_xticklabels(ordered_params, rotation=30, ha='right', fontsize=7)
                 ax.set_ylabel(title, fontsize=10)
                 ax.set_title(title, fontsize=11, fontweight='bold')
                 ax.set_ylim(0, 1.05)
@@ -250,5 +300,6 @@ class Benchmarker:
             plt.tight_layout()
 
             if save_dir:
+                os.makedirs(os.path.join(save_dir, pert_type), exist_ok=True)
                 plt.savefig(os.path.join(save_dir, pert_type, f'{pert_type}_performance.png'), dpi=200, bbox_inches='tight')
             plt.show()
