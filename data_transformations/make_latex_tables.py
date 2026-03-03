@@ -1,17 +1,8 @@
 """
 make_latex_tables.py
 
-Carica i 18 CSV dal benchmark e genera tabelle LaTeX.
-Una tabella per ogni combinazione (dataset, perturbation_type).
+Upload the 18 CSV and generates Latex tables.
 
-Struttura tabella:
-  - midrule baseline: tutti i modelli su dati originali
-  - midrule per ogni livello di perturbazione: tutti i modelli
-  - colonne: AUROC, F1, Precision, Recall (mean +- std)
-
-Usage:
-    python make_latex_tables.py
-    python make_latex_tables.py --save_dir /path/to/results/ --out latex_tables.tex
 """
 
 import os
@@ -50,12 +41,12 @@ def fmt(mean, std=None):
         return '--'
     if std is None or (isinstance(std, float) and np.isnan(std)):
         return f'{float(mean):.3f}'
-    return f'{float(mean):.3f} $\\pm$ {float(std):.3f}'
+    return f'{float(mean):.3f} \\pm {float(std):.3f}'
 
 
 def make_table(df, dataset, pert_type):
     ds_label = dataset.replace('abundance_', '').replace('--', '-')
-    pert_label = pert_type.replace('_', '\\_')
+    pert_label = pert_type.replace('_', ' ')
 
     models = [m for m in MODEL_DISPLAY if m in df['model'].unique()]
     param_values = list(dict.fromkeys(df['param_value'].tolist()))  # preserve order, deduplicate
@@ -65,7 +56,7 @@ def make_table(df, dataset, pert_type):
 
     lines = []
     lines.append(f'\\begin{{table}}[h]')
-    lines.append(f'\\caption{{\\textbf{{{ds_label} --- {pert_type.replace("_", " ")} perturbation}}. '
+    lines.append(f'\\caption{{\\textbf{{{ds_label} --- {pert_label} perturbation}}. '
                  f'Mean $\\pm$ std over 5-fold CV. '
                  f'\\textit{{Baseline}}: model trained and tested on original data. '
                  f'Each block shows all models at one perturbation level.}}')

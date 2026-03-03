@@ -33,7 +33,7 @@ PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 MODEL_LIST = ['rf', 'tabicl', 'original_v2']
 
 PRECOMPUTED_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets/'
-SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results/'
+SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_1/'
 
 #%%
 '''
@@ -70,16 +70,16 @@ for dataset in datasets:
             n_features_max     = 100000,
             device             = 'cuda',
             seed               = 42,
-            precomputed_dir    = PRECOMPUTED_DIR,
-            save_dir           = SAVE_DIR,
+            # precomputed_dir    = PRECOMPUTED_DIR,
+            # save_dir           = SAVE_DIR,
         )
         all_results.append(df)
 
         # Salva subito il CSV per questa combinazione
-        out_dir = os.path.join(SAVE_DIR, dataset)
-        os.makedirs(out_dir, exist_ok=True)
-        df.to_csv(os.path.join(out_dir, f"{pert_type}.csv"), index=False)
-        print(f"Saved -> {out_dir}/{pert_type}.csv")
+        # out_dir = os.path.join(SAVE_DIR, dataset)
+        # os.makedirs(out_dir, exist_ok=True)
+        # df.to_csv(os.path.join(out_dir, f"{pert_type}.csv"), index=False)
+        # print(f"Saved -> {out_dir}/{pert_type}.csv")
 
 
 #%%
@@ -100,7 +100,3 @@ for dataset in datasets:
 #
 # bench = Benchmarker()
 # bench.plot(results_df, figsize=(8, 5), save_dir=SAVE_DIR)
-
-#%%
-
-## Upload csv files and create Latex tables
