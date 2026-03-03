@@ -30,17 +30,23 @@ DATASETS = [
 
 PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 
-MODEL_LIST = ['tabicl', 'rf', 'tabicl', 'original_v2']
+MODEL_LIST = ['rf', 'tabicl', 'original_v2']
 
 PRECOMPUTED_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets/'
 SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results/'
 
 #%%
+'''
+To run the test:
+python test_perturbations.py --dataset abundance_cirrhosis--stagediscovery --pert remove_features
+python test_perturbations.py --dataset abundance_obesity --pert sparsity
+...
+    '''
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default=None, choices=DATASETS)
 parser.add_argument('--pert',    type=str, default=None, choices=PERTURBATION_TYPES)
-args, _ = parser.parse_known_args()  # _ evita errori se lanciato da Jupyter
+args, _ = parser.parse_known_args()
 
 # Se passati da CLI usa quelli, altrimenti gira tutto
 datasets   = [args.dataset]   if args.dataset else DATASETS
@@ -60,7 +66,7 @@ for dataset in datasets:
             pert_type          = pert_type,
             model_names        = MODEL_LIST,
             cv                 = 5,
-            n_features_protect = 2,
+            n_features_protect = 5,
             n_features_max     = 100000,
             device             = 'cuda',
             seed               = 42,
@@ -76,7 +82,7 @@ for dataset in datasets:
         print(f"Saved -> {out_dir}/{pert_type}.csv")
 
 
-# #%%
+#%%
 # # --- plot_results.py (da lanciare alla fine) ---
 # import os
 # import glob
@@ -95,13 +101,6 @@ for dataset in datasets:
 # bench = Benchmarker()
 # bench.plot(results_df, figsize=(8, 5), save_dir=SAVE_DIR)
 
-####################
+#%%
 
-'''To run the test:
-python test_perturbations.py --dataset abundance_cirrhosis--stagediscovery --pert remove_features
-python test_perturbations.py --dataset abundance_obesity --pert sparsity
-...
-...
-...
-
-'''
+## Upload csv files and create Latex tables

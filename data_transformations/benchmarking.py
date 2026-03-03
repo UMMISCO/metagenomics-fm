@@ -110,6 +110,13 @@ def _cv_scores(
             y_train = np.asarray(y_train)
 
         model.fit(X_train, y_train)
+
+        # # DEBUG GPU
+        # import torch, time
+        # if torch.cuda.is_available():
+        #     print(
+        #         f"    GPU mem after fit: {torch.cuda.memory_allocated() / 1e6:.0f}MB  allocated: {torch.cuda.memory_reserved() / 1e6:.0f}MB")
+
         proba = model.predict_proba(X_test)
         pred  = model.predict(X_test)
 
