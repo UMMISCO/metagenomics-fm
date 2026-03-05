@@ -1,6 +1,5 @@
 """
 make_latex_tables.py
-
 Upload the 18 CSV and generates Latex tables.
 
 """

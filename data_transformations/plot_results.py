@@ -4,6 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import seaborn as sns
 
+"""
+Create nice plot starting from the bis csv file (output of merge_tidy.py
+"""
+
 # =============================================================================
 # CONFIG
 # =============================================================================

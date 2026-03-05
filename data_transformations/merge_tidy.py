@@ -3,16 +3,27 @@ import glob
 import argparse
 import pandas as pd
 
+'''
+Merges the csv files for each perturbation and dataset in one big csv file in
+order to be able to study and process it easily.
+'''
 # =============================================================================
 # CONFIG
 # =============================================================================
 RESULTS_DIR = (
     "/data/projects/deepintegromics/analyses/3.tabpfn/"
-    "metagen_foundation_models/data_transformations/benchmark_results/"
+    "metagen_foundation_models/data_transformations/benchmark_results_v2/"
 )
 OUTPUT_FILE = "benchmark_tidy.csv"
 
-MODEL_DISPLAY = {"rf": "RF", "tabicl": "TabICL", "original_v2": "TabPFN"}
+MODEL_DISPLAY = {
+    "rf":          "RF",
+    "tabicl":      "TabICL",
+    "original_v2": "TabPFN",
+    "xgb":         "XGBoost",
+    "tabdpt":      "TabDPT",
+    "contextab":   "ContextTab",
+}
 
 METRICS = [
     ("auroc_mean", "auroc_std", "AUROC"),
@@ -76,10 +87,9 @@ def main():
         return
 
     print(f"Trovati {len(csv_files)} file CSV\n")
-    print(f"{'FILE':<55} {'WIDE':>6}  {'MODELLI':<25}  {'PARAMS':>6}  {'TIDY':>6}")
-    print("-" * 110)
+    print(f"{'FILE':<65} {'WIDE':>6}  {'MODELLI':<30}  {'PARAMS':>6}  {'TIDY':>6}")
+    print("-" * 120)
 
-    # Se il file di output esiste già, lo cancelliamo per ricominciare puliti
     if os.path.exists(args.out):
         os.remove(args.out)
         print(f"[INFO] Output esistente rimosso: {args.out}\n")
@@ -90,7 +100,6 @@ def main():
     for i, fpath in enumerate(csv_files):
         fname = os.path.relpath(fpath, args.results_dir)
 
-        # --- 1. Leggi il file wide ---
         try:
             df_wide = pd.read_csv(fpath)
         except Exception as e:
@@ -101,13 +110,11 @@ def main():
             print(f"  [SKIP]  {fname} — vuoto")
             continue
 
-        # --- 2. Controlla colonne ---
         missing = REQUIRED_COLS - set(df_wide.columns)
         if missing:
             print(f"  [SKIP]  {fname} — colonne mancanti: {missing}")
             continue
 
-        # --- 3. Deduplicazione (fix MODEL_LIST duplicato) ---
         before_dedup = len(df_wide)
         df_wide = df_wide.drop_duplicates(
             subset=["dataset", "model", "perturbation", "param_key", "param_value"]
@@ -115,48 +122,33 @@ def main():
         after_dedup = len(df_wide)
         dedup_note = f" (rimossi {before_dedup - after_dedup} duplicati)" if before_dedup != after_dedup else ""
 
-        # --- 4. Info sul contenuto ---
         models_found = df_wide["model"].value_counts().to_dict()
         models_str   = ", ".join(f"{MODEL_DISPLAY.get(k,k)}:{v}" for k, v in models_found.items())
         n_params     = df_wide["param_value"].nunique()
 
-        # --- 5. Converti in tidy ---
         df_tidy = wide_to_tidy(df_wide)
         n_tidy  = len(df_tidy)
 
-        # --- 6. Appendi al CSV di output ---
         write_header = (i == 0) or (not os.path.exists(args.out))
         df_tidy.to_csv(args.out, mode='a', header=write_header, index=False)
 
         total_wide += after_dedup
         total_tidy += n_tidy
 
-        print(f"  [{i+1:02d}] {fname:<52} {after_dedup:>6}  {models_str:<25}  {n_params:>6}  {n_tidy:>6}{dedup_note}")
+        print(f"  [{i+1:02d}] {fname:<62} {after_dedup:>6}  {models_str:<30}  {n_params:>6}  {n_tidy:>6}{dedup_note}")
 
-    # --- Report finale ---
-    print("-" * 110)
-    print(f"\n{'TOTALE':<55} {total_wide:>6}  {'':25}  {'':>6}  {total_tidy:>6}")
+    print("-" * 120)
+    print(f"\n{'TOTALE':<65} {total_wide:>6}  {'':30}  {'':>6}  {total_tidy:>6}")
     print(f"\nSalvato → {args.out}")
 
-    # --- Verifica finale ---
     df_final = pd.read_csv(args.out)
-
-    n_total      = len(df_final)
-    n_mean_ok    = df_final["Metric mean"].notna().sum()
-    n_mean_nan   = df_final["Metric mean"].isna().sum()
-    n_std_ok     = df_final["Metric std"].notna().sum()
-    n_std_nan    = df_final["Metric std"].isna().sum()
-    n_baseline   = n_total - n_std_ok   # righe baseline non hanno std
-
+    n_total    = len(df_final)
+    n_std_nan  = df_final["Metric std"].isna().sum()
+    n_models   = df_final["Model name"].nunique()
     print(f"\nVerifica CSV finale:")
-    print(f"  Righe totali         : {n_total}")
-    print(f"  Metric mean — validi : {n_mean_ok}  |  NaN: {n_mean_nan}")
-    print(f"  Metric std  — validi : {n_std_ok}   |  NaN: {n_std_nan}  ← righe baseline senza std")
-    print(f"\n  Attesi NaN in std    : 3 modelli × 6 dataset × 3 perturbazioni × 4 metriche = {3*6*3*4}")
-    if n_std_nan == 3*6*3*4:
-        print(f"  [OK] NaN in std corrispondono esattamente alle righe baseline")
-    else:
-        print(f"  [WARN] NaN in std ({n_std_nan}) != attesi ({3*6*3*4}) — controlla i file")
+    print(f"  Righe totali  : {n_total}")
+    print(f"  Modelli unici : {n_models} → {sorted(df_final['Model name'].unique())}")
+    print(f"  Metric std NaN: {n_std_nan} (attesi: n_modelli × 6 dataset × 3 pert × 4 metriche = {n_models*6*3*4})")
 
 
 if __name__ == "__main__":

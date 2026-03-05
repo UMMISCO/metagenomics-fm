@@ -27,16 +27,35 @@ def load_tabfn_model(model_name: str, device: str = 'cuda'):
     if model_name == 'rf':
         from sklearn.ensemble import RandomForestClassifier
         return RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+
+    elif model_name == 'xgb':
+        from xgboost import XGBClassifier
+        return XGBClassifier(
+            n_estimators=100,
+            random_state=42,
+            n_jobs=-1,
+            device=device if device != 'cpu' else 'cpu',
+            eval_metric='logloss',
+            verbosity=0,
+        )
+
     elif model_name == 'tabdpt':
         from tabdpt import TabDPTClassifier
-        return TabDPTClassifier(device=device)
+        return TabDPTClassifier(device='cpu')
+
     elif model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         import torch
         return TabPFNClassifier(device=device, inference_precision=torch.float32)
+
     elif model_name == 'tabicl':
         from tabicl import TabICLClassifier
         return TabICLClassifier(device=device, use_amp=False)
+
+    elif model_name == 'contextab':
+        from sap_rpt_oss import SAP_RPT_OSS_Classifier
+        return SAP_RPT_OSS_Classifier(bagging=8, max_context_size=2048)
+
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
@@ -81,6 +100,17 @@ def _adaptive_params(pert_type: str, n_features: int, actual_sparsity: float, se
     return []
 
 
+def _coerce_inputs(model_name, X_train, X_test, y_train, col_names):
+    """Apply model-specific input coercions."""
+    if model_name in ('tabdpt', 'xgb'):
+        y_train = np.asarray(y_train)
+        y_train = np.asarray(y_train)
+    if model_name == 'contextab':
+        X_train = pd.DataFrame(X_train, columns=col_names)
+        X_test  = pd.DataFrame(X_test,  columns=col_names)
+    return X_train, X_test, y_train
+
+
 def _cv_scores(
     model_name: str,
     X: pd.DataFrame,
@@ -89,10 +119,20 @@ def _cv_scores(
     n_features_max: int,
     device: str,
     random_state: int,
-) -> dict:
-    """Baseline CV: TRAIN e TEST entrambi su X_original."""
+) -> Tuple[dict, pd.DataFrame]:
+    """
+    Baseline CV: TRAIN e TEST entrambi su X_original.
+    Ritorna (metrics_dict, oof_predictions_df).
+    """
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     auroc_scores, f1_scores, prec_scores, rec_scores = [], [], [], []
+    col_names = X.columns.tolist()
+
+    # OOF: accumulatori per sample_idx
+    n_samples  = len(y)
+    n_classes  = len(np.unique(y))
+    oof_proba  = np.zeros((n_samples, n_classes))
+    oof_counts = np.zeros(n_samples)  # quante volte ogni sample è stato nel test set
 
     for train_idx, test_idx in skf.split(X, y):
         X_train = X.iloc[train_idx].values
@@ -106,22 +146,35 @@ def _cv_scores(
             X_test   = X_test[:, selected]
 
         model = load_tabfn_model(model_name, device=device)
-        if model_name == 'tabdpt':
-            y_train = np.asarray(y_train)
+        X_train, X_test, y_train = _coerce_inputs(model_name, X_train, X_test, y_train, col_names)
 
         model.fit(X_train, y_train)
-
         proba = model.predict_proba(X_test)
         pred  = model.predict(X_test)
 
-        avg = 'macro' if len(np.unique(y)) > 2 else 'binary'
+        # accumula proba OOF
+        oof_proba[test_idx]  += proba
+        oof_counts[test_idx] += 1
+
+        avg = 'macro' if n_classes > 2 else 'binary'
         auroc_scores.append(roc_auc_score(y_test, proba, multi_class='ovr') if proba.shape[1] > 2
                             else roc_auc_score(y_test, proba[:, 1]))
         f1_scores.append(f1_score(y_test, pred, average=avg, zero_division=0))
         prec_scores.append(precision_score(y_test, pred, average=avg, zero_division=0))
         rec_scores.append(recall_score(y_test, pred, average=avg, zero_division=0))
 
-    return {
+    # media delle proba OOF (ogni sample è nel test set esattamente 1 volta con StratifiedKFold)
+    oof_proba_mean = oof_proba / np.maximum(oof_counts[:, None], 1)
+    oof_pred       = np.argmax(oof_proba_mean, axis=1)
+
+    oof_df = pd.DataFrame({
+        'sample_idx': np.arange(n_samples),
+        'y_true':     y,
+        'y_pred':     oof_pred,
+        **{f'proba_class{c}': oof_proba_mean[:, c] for c in range(n_classes)},
+    })
+
+    metrics = {
         'auroc_mean': round(float(np.mean(auroc_scores)), 4),
         'auroc_std':  round(float(np.std(auroc_scores)), 4),
         'f1_mean':    round(float(np.mean(f1_scores)), 4),
@@ -131,6 +184,7 @@ def _cv_scores(
         'rec_mean':   round(float(np.mean(rec_scores)), 4),
         'rec_std':    round(float(np.std(rec_scores)), 4),
     }
+    return metrics, oof_df
 
 
 def _cv_scores_ood(
@@ -142,24 +196,27 @@ def _cv_scores_ood(
     n_features_max: int,
     device: str,
     random_state: int,
-) -> dict:
+) -> Tuple[dict, pd.DataFrame]:
     """
     OOD evaluation:
-      - Split calcolato su X_original (stratificazione consistente)
-      - TRAIN su X_original[train_idx]   <- dati puliti
-      - TEST  su X_perturbed[test_idx]   <- stessi campioni, perturbati
-
-    Feature selection fittata solo sul train originale (no leakage).
+      - TRAIN su X_original[train_idx]
+      - TEST  su X_perturbed[test_idx]
+    Ritorna (metrics_dict, oof_predictions_df).
     """
-    common_cols = X_perturbed.columns
-    X_original = X_original[common_cols]
+    common_cols = X_perturbed.columns.tolist()
+    X_original  = X_original[common_cols]
 
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     auroc_scores, f1_scores, prec_scores, rec_scores = [], [], [], []
 
+    n_samples  = len(y)
+    n_classes  = len(np.unique(y))
+    oof_proba  = np.zeros((n_samples, n_classes))
+    oof_counts = np.zeros(n_samples)
+
     for train_idx, test_idx in skf.split(X_original, y):
-        X_train = X_original.iloc[train_idx].values   # <- ORIGINALE
-        X_test  = X_perturbed.iloc[test_idx].values   # <- PERTURBATO
+        X_train = X_original.iloc[train_idx].values
+        X_test  = X_perturbed.iloc[test_idx].values
         y_train = y[train_idx]
         y_test  = y[test_idx]
 
@@ -169,21 +226,33 @@ def _cv_scores_ood(
             X_test   = X_test[:, selected]
 
         model = load_tabfn_model(model_name, device=device)
-        if model_name == 'tabdpt':
-            y_train = np.asarray(y_train)
+        X_train, X_test, y_train = _coerce_inputs(model_name, X_train, X_test, y_train, common_cols)
 
         model.fit(X_train, y_train)
         proba = model.predict_proba(X_test)
         pred  = model.predict(X_test)
 
-        avg = 'macro' if len(np.unique(y)) > 2 else 'binary'
+        oof_proba[test_idx]  += proba
+        oof_counts[test_idx] += 1
+
+        avg = 'macro' if n_classes > 2 else 'binary'
         auroc_scores.append(roc_auc_score(y_test, proba, multi_class='ovr') if proba.shape[1] > 2
                             else roc_auc_score(y_test, proba[:, 1]))
         f1_scores.append(f1_score(y_test, pred, average=avg, zero_division=0))
         prec_scores.append(precision_score(y_test, pred, average=avg, zero_division=0))
         rec_scores.append(recall_score(y_test, pred, average=avg, zero_division=0))
 
-    return {
+    oof_proba_mean = oof_proba / np.maximum(oof_counts[:, None], 1)
+    oof_pred       = np.argmax(oof_proba_mean, axis=1)
+
+    oof_df = pd.DataFrame({
+        'sample_idx': np.arange(n_samples),
+        'y_true':     y,
+        'y_pred':     oof_pred,
+        **{f'proba_class{c}': oof_proba_mean[:, c] for c in range(n_classes)},
+    })
+
+    metrics = {
         'auroc_mean': round(float(np.mean(auroc_scores)), 4),
         'auroc_std':  round(float(np.std(auroc_scores)), 4),
         'f1_mean':    round(float(np.mean(f1_scores)), 4),
@@ -193,6 +262,7 @@ def _cv_scores_ood(
         'rec_mean':   round(float(np.mean(rec_scores)), 4),
         'rec_std':    round(float(np.std(rec_scores)), 4),
     }
+    return metrics, oof_df
 
 
 # =============================================================================
@@ -217,14 +287,15 @@ class Benchmarker:
         seed: int = 42,
         precomputed_dir: Optional[str] = None,
         save_dir: Optional[str] = None,
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         OOD benchmark per una singola combinazione (dataset, perturbation_type).
 
-        Protocollo per fold
-        -------------------
-        baseline : train X_original[train_idx] -> test X_original[test_idx]
-        OOD      : train X_original[train_idx] -> test X_perturbed[test_idx]
+        Ritorna:
+          results_df   — metriche aggregate (come prima)
+          oof_df       — predizioni OOF per sample
+                         colonne: dataset, model, perturbation, param_value,
+                                  split, sample_idx, y_true, y_pred, proba_class*
         """
         if model_names is None:
             model_names = ['rf']
@@ -253,7 +324,6 @@ class Benchmarker:
                 X_original = df_orig.drop(columns=['label'])
             else:
                 X_original = gen.X_original
-
             for params in dataset_params:
                 _, param_val = _param_label(params)
                 fname = _params_to_filename(pert_type, params)
@@ -266,13 +336,24 @@ class Benchmarker:
         else:
             X_original = gen.X_original
 
-        rows = []
+        rows     = []
+        oof_rows = []
+
         for model_name in model_names:
             print(f"\n  Model: {model_name}")
 
-            # Baseline: orig -> orig
-            baseline = _cv_scores(model_name, X_original, y, cv, n_features_max, device, random_state)
+            # --- Baseline: orig -> orig ---
+            baseline, oof_base = _cv_scores(
+                model_name, X_original, y, cv, n_features_max, device, random_state
+            )
             print(f"    [baseline] orig->orig  AUROC={baseline['auroc_mean']:.3f}+-{baseline['auroc_std']:.3f}")
+
+            # tag baseline OOF
+            oof_base = oof_base.assign(
+                dataset=dataset, model=model_name,
+                perturbation=pert_type, param_value='baseline', split='baseline'
+            )
+            oof_rows.append(oof_base)
 
             for params in dataset_params:
                 param_key, param_val = _param_label(params)
@@ -281,11 +362,17 @@ class Benchmarker:
                 if X_pert is None:
                     X_pert = gen.generate(**params)
 
-                # OOD: train originale -> test perturbato
-                scores = _cv_scores_ood(
+                scores, oof_ood = _cv_scores_ood(
                     model_name, X_original, X_pert, y, cv, n_features_max, device, random_state
                 )
                 print(f"    [OOD] {param_val:35s}  AUROC={scores['auroc_mean']:.3f}+-{scores['auroc_std']:.3f}  F1={scores['f1_mean']:.3f}")
+
+                # tag OOD OOF
+                oof_ood = oof_ood.assign(
+                    dataset=dataset, model=model_name,
+                    perturbation=pert_type, param_value=param_val, split='ood'
+                )
+                oof_rows.append(oof_ood)
 
                 rows.append({
                     'perturbation':   pert_type,
@@ -301,15 +388,22 @@ class Benchmarker:
                 })
 
         results_df = pd.DataFrame(rows)
+        oof_df     = pd.concat(oof_rows, ignore_index=True)
+
+        # riordina colonne OOF
+        proba_cols = [c for c in oof_df.columns if c.startswith('proba_')]
+        oof_df = oof_df[['dataset', 'model', 'perturbation', 'param_value', 'split',
+                          'sample_idx', 'y_true', 'y_pred'] + proba_cols]
 
         if save_dir:
             out_dir = os.path.join(save_dir, dataset)
             os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, f"{pert_type}.parquet")
-            results_df.to_parquet(out_path, index=False)
-            print(f"\n  Saved -> {out_path}")
+            results_df.to_parquet(os.path.join(out_dir, f"{pert_type}.parquet"), index=False)
+            oof_df.to_parquet(os.path.join(out_dir, f"{pert_type}_predictions.parquet"), index=False)
+            print(f"\n  Saved -> {out_dir}/{pert_type}.parquet")
+            print(f"  Saved -> {out_dir}/{pert_type}_predictions.parquet")
 
-        return results_df
+        return results_df, oof_df
 
     def plot(
         self,
@@ -317,10 +411,6 @@ class Benchmarker:
         figsize: Tuple[int, int] = (8, 5),
         save_dir: Optional[str] = None,
     ) -> None:
-        """
-        Linea continua    = score OOD  (train originale / test perturbato)
-        Linea tratteggiata = baseline  (train originale / test originale)
-        """
         metrics = [
             ('auroc_mean', 'auroc_std', 'AUROC',    'baseline_auroc'),
             ('f1_mean',    'f1_std',    'F1',        'baseline_f1'),
@@ -335,7 +425,6 @@ class Benchmarker:
 
         for pert_type in results_df['perturbation'].unique():
             df_pert = results_df[results_df['perturbation'] == pert_type]
-
             fig, axes = plt.subplots(1, len(metrics), figsize=(figsize[0] * len(metrics), figsize[1]))
 
             for ax, (mean_col, std_col, title, base_col) in zip(axes, metrics):
@@ -347,23 +436,16 @@ class Benchmarker:
                         ]
                         if sub.empty:
                             continue
-
                         x     = range(len(sub))
                         label = f"{dataset.replace('abundance_', '')} / {model_name}"
                         color = palette[d_idx]
                         ls    = linestyles[m_idx % len(linestyles)]
-
-                        # Curva OOD
                         ax.plot(x, sub[mean_col], marker='o', linewidth=1.5,
                                 color=color, linestyle=ls, label=label)
-                        ax.fill_between(
-                            x,
+                        ax.fill_between(x,
                             sub[mean_col] - sub[std_col],
                             sub[mean_col] + sub[std_col],
-                            alpha=0.1, color=color,
-                        )
-
-                        # Baseline orizzontale tratteggiata
+                            alpha=0.1, color=color)
                         if base_col in sub.columns:
                             ax.axhline(sub[base_col].iloc[0], color=color,
                                        linestyle='--', linewidth=0.9, alpha=0.55)
@@ -386,7 +468,6 @@ class Benchmarker:
                 fontsize=11, fontweight='bold',
             )
             plt.tight_layout()
-
             if save_dir:
                 os.makedirs(os.path.join(save_dir, pert_type), exist_ok=True)
                 plt.savefig(
