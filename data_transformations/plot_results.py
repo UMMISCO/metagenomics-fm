@@ -5,38 +5,27 @@ import matplotlib.lines as mlines
 import seaborn as sns
 
 """
-Create nice plot starting from the bis csv file (output of merge_tidy.py
+Un plot per (dataset, perturbazione, metrica).
+X      = livelli del parametro di perturbazione (ordinati)
+Y      = metrica (mean ± std)
+Colore = modello
+Linea nera tratteggiata = baseline di ogni modello
 """
 
 # =============================================================================
 # CONFIG
 # =============================================================================
-TIDY_CSV  = "benchmark_tidy.csv"
-SAVE_DIR  = "plots/"
-METRICS   = ["AUROC", "F1"]
+TIDY_CSV = "benchmark_tidy.csv"
+SAVE_DIR = "plots/"
+METRICS  = ["AUROC", "F1"]
 
 MODEL_COLORS = {
-    "RF":     "#2196F3",   # blu
-    "TabICL": "#FF5722",   # arancio
-    "TabPFN": "#4CAF50",   # verde
-}
-
-DATASET_LINESTYLES = {
-    "abundance_WT2D":                          "-",
-    "abundance_cirrhosis--stagediscovery":     "--",
-    "abundance_cirrhosis--stagevalidation":    "-.",
-    "abundance_ibd":                           ":",
-    "abundance_obesity":                       (0, (3, 1, 1, 1)),      # trattino-punto
-    "abundance_t2d":                           (0, (5, 1)),             # trattino lungo
-}
-
-DATASET_MARKERS = {
-    "abundance_WT2D":                          "o",
-    "abundance_cirrhosis--stagediscovery":     "s",
-    "abundance_cirrhosis--stagevalidation":    "^",
-    "abundance_ibd":                           "D",
-    "abundance_obesity":                       "P",
-    "abundance_t2d":                           "*",
+    "RF":         "#2196F3",   # blu
+    "TabICL":     "#FF5722",   # arancio
+    "TabPFN":     "#4CAF50",   # verde
+    "XGBoost":    "#9C27B0",   # viola
+    "TabDPT":     "#F44336",   # rosso
+    "ContextTab": "#FF9800",   # ambra
 }
 
 DATASET_LABELS = {
@@ -53,128 +42,103 @@ DATASET_LABELS = {
 # =============================================================================
 
 def sort_param_values(values: list) -> list:
-    """Ordina i parametri: numerici in modo crescente, stringhe alfabeticamente."""
     try:
         return sorted(values, key=lambda x: float(str(x).split("=")[-1].split("/")[0].strip()))
     except ValueError:
         return sorted(values, key=str)
 
 
-def plot_perturbation(df: pd.DataFrame, pert_type: str, save_dir: str) -> None:
-    """
-    Un plot per (perturbazione, metrica) — 2 plot per perturbazione.
-    X      = livelli del parametro di perturbazione (ordinati)
-    Y      = metrica (mean ± std)
-    Colore = modello
-    Linea  = dataset
-    """
-    df_pert = df[df["Perturbation name"] == pert_type].copy()
-    if df_pert.empty:
-        print(f"[SKIP] Nessun dato per perturbazione: {pert_type}")
+# =============================================================================
+# PLOT
+# =============================================================================
+
+def plot_one(df: pd.DataFrame, dataset: str, pert_type: str, metric: str, save_dir: str) -> None:
+    df_sub = df[
+        (df["Dataset name"]      == dataset) &
+        (df["Perturbation name"] == pert_type) &
+        (df["Metric name"]       == metric)
+    ].copy()
+
+    if df_sub.empty:
         return
 
-    datasets = [d for d in DATASET_LINESTYLES if d in df_pert["Dataset name"].unique()]
-    models   = [m for m in MODEL_COLORS       if m in df_pert["Model name"].unique()]
+    models = [m for m in MODEL_COLORS if m in df_sub["Model name"].unique()]
 
-    # Ordina i parametri sull'asse x
-    param_values = sort_param_values(df_pert["Perturbation parameter value"].unique().tolist())
+    # parametri OOD sull'asse x (esclude baseline che ha std NaN)
+    df_ood  = df_sub.dropna(subset=["Metric std"])
+    param_values = sort_param_values(df_ood["Perturbation parameter value"].unique().tolist())
     x_positions  = {v: i for i, v in enumerate(param_values)}
 
-    for metric in METRICS:
-        df_m = df_pert[df_pert["Metric name"] == metric]
+    fig, ax = plt.subplots(figsize=(8, 4.5))
 
-        fig, ax = plt.subplots(figsize=(11, 5))
+    for model in models:
+        color = MODEL_COLORS[model]
 
-        for dataset in datasets:
-            ls     = DATASET_LINESTYLES[dataset]
-            marker = DATASET_MARKERS[dataset]
-            label  = DATASET_LABELS[dataset]
+        sub_ood = df_ood[df_ood["Model name"] == model].copy()
+        if sub_ood.empty:
+            continue
 
-            for model in models:
-                color = MODEL_COLORS[model]
+        sub_ood["x"] = sub_ood["Perturbation parameter value"].map(x_positions)
+        sub_ood = sub_ood.sort_values("x")
 
-                sub = df_m[
-                    (df_m["Dataset name"] == dataset) &
-                    (df_m["Model name"]   == model)
-                ].copy()
+        x    = sub_ood["x"].values
+        mean = sub_ood["Metric mean"].values
+        std  = sub_ood["Metric std"].values
 
-                if sub.empty:
-                    continue
+        # linea OOD colorata
+        ax.plot(x, mean,
+                color=color, linestyle='-', marker='o',
+                linewidth=1.8, markersize=5, label=model, alpha=0.9)
+        ax.fill_between(x, mean - std, mean + std,
+                        color=color, alpha=0.1)
 
-                # Rimuovi baseline (std = NaN) dal plot OOD
-                sub_ood = sub.dropna(subset=["Metric std"])
-                if sub_ood.empty:
-                    continue
-
-                sub_ood = sub_ood.copy()
-                sub_ood["x"] = sub_ood["Perturbation parameter value"].map(x_positions)
-                sub_ood = sub_ood.sort_values("x")
-
-                x    = sub_ood["x"].values
-                mean = sub_ood["Metric mean"].values
-                std  = sub_ood["Metric std"].values
-
-                ax.plot(x, mean,
-                        color=color, linestyle=ls, marker=marker,
-                        linewidth=1.6, markersize=5, alpha=0.85)
-                ax.fill_between(x, mean - std, mean + std,
-                                color=color, alpha=0.07)
-
-                # Baseline: linea orizzontale tratteggiata sottile
-                sub_base = sub[sub["Metric std"].isna()]
-                if not sub_base.empty:
-                    baseline_val = sub_base["Metric mean"].values[0]
-                    ax.axhline(baseline_val, color=color, linestyle=ls,
-                               linewidth=0.8, alpha=0.35)
-
-        # --- Asse X ---
-        ax.set_xticks(range(len(param_values)))
-        ax.set_xticklabels([str(v) for v in param_values],
-                           rotation=35, ha='right', fontsize=8)
-        ax.set_xlabel("Perturbation parameter value", fontsize=10)
-        ax.set_ylabel(metric, fontsize=11)
-        ax.set_ylim(0, 1.05)
-        ax.grid(True, linestyle='--', alpha=0.3)
-        ax.set_title(
-            f"{pert_type}  —  {metric}\n"
-            f"color = model  |  line style = dataset  |  dashed = baseline",
-            fontsize=11, fontweight='bold'
-        )
-
-        # --- Legenda modelli (colore) ---
-        model_handles = [
-            mlines.Line2D([], [], color=MODEL_COLORS[m], linewidth=2, label=m)
-            for m in models
+        # baseline: linea nera tratteggiata
+        sub_base = df_sub[
+            (df_sub["Model name"]  == model) &
+            (df_sub["Metric std"].isna())
         ]
+        if not sub_base.empty:
+            baseline_val = sub_base["Metric mean"].values[0]
+            ax.axhline(baseline_val, color=color, linestyle='--',
+                       linewidth=1.2, alpha=0.5)
 
-        # --- Legenda dataset (linestyle + marker) ---
-        dataset_handles = [
-            mlines.Line2D([], [], color='gray',
-                          linestyle=DATASET_LINESTYLES[d],
-                          marker=DATASET_MARKERS[d],
-                          markersize=5, linewidth=1.5,
-                          label=DATASET_LABELS[d])
-            for d in datasets
-        ]
+    ax.set_xticks(range(len(param_values)))
+    ax.set_xticklabels([str(v) for v in param_values],
+                       rotation=35, ha='right', fontsize=8)
+    ax.set_xlabel("Perturbation parameter value", fontsize=9)
+    ax.set_ylabel(metric, fontsize=10)
+    ax.set_ylim(0, 1.05)
+    ax.grid(True, linestyle='--', alpha=0.3)
 
-        leg1 = ax.legend(handles=model_handles,
-                         title="Model", fontsize=8, title_fontsize=9,
-                         loc='upper right', frameon=True)
-        ax.add_artist(leg1)
-        ax.legend(handles=dataset_handles,
-                  title="Dataset", fontsize=8, title_fontsize=9,
-                  loc='lower left', frameon=True, ncol=2)
+    dataset_label = DATASET_LABELS.get(dataset, dataset)
+    ax.set_title(
+        f"{dataset_label}  |  {pert_type}  |  {metric}",
+        fontsize=11, fontweight='bold'
+    )
 
-        plt.tight_layout()
+    # legenda modelli
+    model_handles = [
+        mlines.Line2D([], [], color=MODEL_COLORS[m], linewidth=2,
+                      marker='o', markersize=4, label=m)
+        for m in models
+    ]
+    # entry baseline
+    baseline_handle = mlines.Line2D([], [], color='gray', linestyle='--',
+                                    linewidth=1.2, label='baseline (dashed)')
+    ax.legend(handles=model_handles + [baseline_handle],
+              fontsize=8, frameon=True, loc='best')
 
-        if save_dir:
-            os.makedirs(save_dir, exist_ok=True)
-            out = os.path.join(save_dir, f"{pert_type}_{metric}.png")
-            plt.savefig(out, dpi=200, bbox_inches='tight')
-            print(f"  Salvato → {out}")
+    plt.tight_layout()
 
-        plt.show()
-        plt.close()
+    if save_dir:
+        subdir = os.path.join(save_dir, dataset)
+        os.makedirs(subdir, exist_ok=True)
+        fname = f"{pert_type}__{metric}.png"
+        out   = os.path.join(subdir, fname)
+        plt.savefig(out, dpi=200, bbox_inches='tight')
+        print(f"  Salvato → {out}")
+
+    plt.close()
 
 
 # =============================================================================
@@ -185,9 +149,15 @@ def main():
     df = pd.read_csv(TIDY_CSV)
     print(f"Caricato {TIDY_CSV}  —  {len(df)} righe")
 
-    for pert_type in df["Perturbation name"].unique():
-        print(f"\nPlot: {pert_type}")
-        plot_perturbation(df, pert_type, SAVE_DIR)
+    datasets  = df["Dataset name"].unique()
+    pert_types = df["Perturbation name"].unique()
+
+    for dataset in datasets:
+        for pert_type in pert_types:
+            for metric in METRICS:
+                plot_one(df, dataset, pert_type, metric, SAVE_DIR)
+
+    print(f"\nDone — plot salvati in {SAVE_DIR}")
 
 
 if __name__ == "__main__":
