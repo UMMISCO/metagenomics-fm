@@ -41,7 +41,7 @@ def load_tabfn_model(model_name: str, device: str = 'cuda'):
 
     elif model_name == 'tabdpt':
         from tabdpt import TabDPTClassifier
-        return TabDPTClassifier(device='cpu')
+        return TabDPTClassifier(device='cpu', compile=False)
 
     elif model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
@@ -54,7 +54,7 @@ def load_tabfn_model(model_name: str, device: str = 'cuda'):
 
     elif model_name == 'contextab':
         from sap_rpt_oss import SAP_RPT_OSS_Classifier
-        return SAP_RPT_OSS_Classifier(bagging=8, max_context_size=2048)
+        return SAP_RPT_OSS_Classifier(bagging=1, max_context_size=2048)
 
     else:
         raise ValueError(f"Unknown model: {model_name}")
@@ -104,7 +104,6 @@ def _coerce_inputs(model_name, X_train, X_test, y_train, col_names):
     """Apply model-specific input coercions."""
     if model_name in ('tabdpt', 'xgb'):
         y_train = np.asarray(y_train)
-        y_train = np.asarray(y_train)
     if model_name == 'contextab':
         X_train = pd.DataFrame(X_train, columns=col_names)
         X_test  = pd.DataFrame(X_test,  columns=col_names)
@@ -122,19 +121,22 @@ def _cv_scores(
 ) -> Tuple[dict, pd.DataFrame]:
     """
     Baseline CV: TRAIN e TEST entrambi su X_original.
-    Ritorna (metrics_dict, oof_predictions_df).
+    Ritorna (metrics_dict, predictions_df).
+
+    metrics_dict contiene:
+      - auroc_mean, auroc_std, ... (aggregate come prima)
+      - fold_0_auroc, fold_0_f1, fold_0_prec, fold_0_rec, ... (per fold)
+
+    predictions_df contiene una riga per (fold, sample_idx) nel test set:
+      fold, sample_idx, y_true, proba_class0, proba_class1, ...
     """
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     auroc_scores, f1_scores, prec_scores, rec_scores = [], [], [], []
     col_names = X.columns.tolist()
+    n_classes = len(np.unique(y))
+    pred_rows = []
 
-    # OOF: accumulatori per sample_idx
-    n_samples  = len(y)
-    n_classes  = len(np.unique(y))
-    oof_proba  = np.zeros((n_samples, n_classes))
-    oof_counts = np.zeros(n_samples)  # quante volte ogni sample è stato nel test set
-
-    for train_idx, test_idx in skf.split(X, y):
+    for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X, y)):
         X_train = X.iloc[train_idx].values
         X_test  = X.iloc[test_idx].values
         y_train = y[train_idx]
@@ -152,10 +154,6 @@ def _cv_scores(
         proba = model.predict_proba(X_test)
         pred  = model.predict(X_test)
 
-        # accumula proba OOF
-        oof_proba[test_idx]  += proba
-        oof_counts[test_idx] += 1
-
         avg = 'macro' if n_classes > 2 else 'binary'
         auroc_scores.append(roc_auc_score(y_test, proba, multi_class='ovr') if proba.shape[1] > 2
                             else roc_auc_score(y_test, proba[:, 1]))
@@ -163,28 +161,23 @@ def _cv_scores(
         prec_scores.append(precision_score(y_test, pred, average=avg, zero_division=0))
         rec_scores.append(recall_score(y_test, pred, average=avg, zero_division=0))
 
-    # media delle proba OOF (ogni sample è nel test set esattamente 1 volta con StratifiedKFold)
-    oof_proba_mean = oof_proba / np.maximum(oof_counts[:, None], 1)
-    oof_pred       = np.argmax(oof_proba_mean, axis=1)
+        for i, sample_idx in enumerate(test_idx):
+            row = {'fold': fold_idx, 'sample_idx': int(sample_idx), 'y_true': int(y_test[i])}
+            for c in range(n_classes):
+                row[f'proba_class{c}'] = round(float(proba[i, c]), 6)
+            pred_rows.append(row)
 
-    oof_df = pd.DataFrame({
-        'sample_idx': np.arange(n_samples),
-        'y_true':     y,
-        'y_pred':     oof_pred,
-        **{f'proba_class{c}': oof_proba_mean[:, c] for c in range(n_classes)},
-    })
+    predictions_df = pd.DataFrame(pred_rows)
 
-    metrics = {
-        'auroc_mean': round(float(np.mean(auroc_scores)), 4),
-        'auroc_std':  round(float(np.std(auroc_scores)), 4),
-        'f1_mean':    round(float(np.mean(f1_scores)), 4),
-        'f1_std':     round(float(np.std(f1_scores)), 4),
-        'prec_mean':  round(float(np.mean(prec_scores)), 4),
-        'prec_std':   round(float(np.std(prec_scores)), 4),
-        'rec_mean':   round(float(np.mean(rec_scores)), 4),
-        'rec_std':    round(float(np.std(rec_scores)), 4),
-    }
-    return metrics, oof_df
+    metrics_df = pd.DataFrame([{
+        'fold':    i,
+        'auroc':   round(float(auroc_scores[i]), 4),
+        'f1':      round(float(f1_scores[i]),    4),
+        'prec':    round(float(prec_scores[i]),  4),
+        'rec':     round(float(rec_scores[i]),   4),
+    } for i in range(cv)])
+
+    return metrics_df, predictions_df
 
 
 def _cv_scores_ood(
@@ -201,20 +194,20 @@ def _cv_scores_ood(
     OOD evaluation:
       - TRAIN su X_original[train_idx]
       - TEST  su X_perturbed[test_idx]
-    Ritorna (metrics_dict, oof_predictions_df).
+    Ritorna (metrics_dict, predictions_df).
+
+    metrics_dict contiene aggregate + per fold.
+    predictions_df: fold, sample_idx, y_true, proba_class0, proba_class1, ...
     """
     common_cols = X_perturbed.columns.tolist()
     X_original  = X_original[common_cols]
 
     skf = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
     auroc_scores, f1_scores, prec_scores, rec_scores = [], [], [], []
+    n_classes = len(np.unique(y))
+    pred_rows = []
 
-    n_samples  = len(y)
-    n_classes  = len(np.unique(y))
-    oof_proba  = np.zeros((n_samples, n_classes))
-    oof_counts = np.zeros(n_samples)
-
-    for train_idx, test_idx in skf.split(X_original, y):
+    for fold_idx, (train_idx, test_idx) in enumerate(skf.split(X_original, y)):
         X_train = X_original.iloc[train_idx].values
         X_test  = X_perturbed.iloc[test_idx].values
         y_train = y[train_idx]
@@ -232,9 +225,6 @@ def _cv_scores_ood(
         proba = model.predict_proba(X_test)
         pred  = model.predict(X_test)
 
-        oof_proba[test_idx]  += proba
-        oof_counts[test_idx] += 1
-
         avg = 'macro' if n_classes > 2 else 'binary'
         auroc_scores.append(roc_auc_score(y_test, proba, multi_class='ovr') if proba.shape[1] > 2
                             else roc_auc_score(y_test, proba[:, 1]))
@@ -242,27 +232,23 @@ def _cv_scores_ood(
         prec_scores.append(precision_score(y_test, pred, average=avg, zero_division=0))
         rec_scores.append(recall_score(y_test, pred, average=avg, zero_division=0))
 
-    oof_proba_mean = oof_proba / np.maximum(oof_counts[:, None], 1)
-    oof_pred       = np.argmax(oof_proba_mean, axis=1)
+        for i, sample_idx in enumerate(test_idx):
+            row = {'fold': fold_idx, 'sample_idx': int(sample_idx), 'y_true': int(y_test[i])}
+            for c in range(n_classes):
+                row[f'proba_class{c}'] = round(float(proba[i, c]), 6)
+            pred_rows.append(row)
 
-    oof_df = pd.DataFrame({
-        'sample_idx': np.arange(n_samples),
-        'y_true':     y,
-        'y_pred':     oof_pred,
-        **{f'proba_class{c}': oof_proba_mean[:, c] for c in range(n_classes)},
-    })
+    predictions_df = pd.DataFrame(pred_rows)
 
-    metrics = {
-        'auroc_mean': round(float(np.mean(auroc_scores)), 4),
-        'auroc_std':  round(float(np.std(auroc_scores)), 4),
-        'f1_mean':    round(float(np.mean(f1_scores)), 4),
-        'f1_std':     round(float(np.std(f1_scores)), 4),
-        'prec_mean':  round(float(np.mean(prec_scores)), 4),
-        'prec_std':   round(float(np.std(prec_scores)), 4),
-        'rec_mean':   round(float(np.mean(rec_scores)), 4),
-        'rec_std':    round(float(np.std(rec_scores)), 4),
-    }
-    return metrics, oof_df
+    metrics_df = pd.DataFrame([{
+        'fold':    i,
+        'auroc':   round(float(auroc_scores[i]), 4),
+        'f1':      round(float(f1_scores[i]),    4),
+        'prec':    round(float(prec_scores[i]),  4),
+        'rec':     round(float(rec_scores[i]),   4),
+    } for i in range(cv)])
+
+    return metrics_df, predictions_df
 
 
 # =============================================================================
@@ -336,24 +322,24 @@ class Benchmarker:
         else:
             X_original = gen.X_original
 
-        rows     = []
-        oof_rows = []
+        metrics_rows = []  # lista di DataFrame long (uno per model×param)
+        pred_rows    = []  # predizioni per fold
 
         for model_name in model_names:
             print(f"\n  Model: {model_name}")
 
             # --- Baseline: orig -> orig ---
-            baseline, oof_base = _cv_scores(
+            baseline_df, preds_base = _cv_scores(
                 model_name, X_original, y, cv, n_features_max, device, random_state
             )
-            print(f"    [baseline] orig->orig  AUROC={baseline['auroc_mean']:.3f}+-{baseline['auroc_std']:.3f}")
+            auroc_mean_base = baseline_df['auroc'].mean()
+            print(f"    [baseline] orig->orig  AUROC={auroc_mean_base:.3f}")
 
-            # tag baseline OOF
-            oof_base = oof_base.assign(
+            preds_base = preds_base.assign(
                 dataset=dataset, model=model_name,
                 perturbation=pert_type, param_value='baseline', split='baseline'
             )
-            oof_rows.append(oof_base)
+            pred_rows.append(preds_base)
 
             for params in dataset_params:
                 param_key, param_val = _param_label(params)
@@ -362,48 +348,54 @@ class Benchmarker:
                 if X_pert is None:
                     X_pert = gen.generate(**params)
 
-                scores, oof_ood = _cv_scores_ood(
+                ood_df, preds_ood = _cv_scores_ood(
                     model_name, X_original, X_pert, y, cv, n_features_max, device, random_state
                 )
-                print(f"    [OOD] {param_val:35s}  AUROC={scores['auroc_mean']:.3f}+-{scores['auroc_std']:.3f}  F1={scores['f1_mean']:.3f}")
+                print(f"    [OOD] {param_val:35s}  AUROC={ood_df['auroc'].mean():.3f}  F1={ood_df['f1'].mean():.3f}")
 
-                # tag OOD OOF
-                oof_ood = oof_ood.assign(
+                preds_ood = preds_ood.assign(
                     dataset=dataset, model=model_name,
                     perturbation=pert_type, param_value=param_val, split='ood'
                 )
-                oof_rows.append(oof_ood)
+                pred_rows.append(preds_ood)
 
-                rows.append({
-                    'perturbation':   pert_type,
-                    'dataset':        dataset,
-                    'model':          model_name,
-                    'param_key':      param_key,
-                    'param_value':    param_val,
-                    'baseline_auroc': baseline['auroc_mean'],
-                    'baseline_f1':    baseline['f1_mean'],
-                    'baseline_prec':  baseline['prec_mean'],
-                    'baseline_rec':   baseline['rec_mean'],
-                    **scores,
-                })
+                # merge baseline e ood per fold → una riga per fold
+                merged = baseline_df.rename(columns={
+                    'auroc': 'baseline_auroc', 'f1': 'baseline_f1',
+                    'prec':  'baseline_prec',  'rec': 'baseline_rec',
+                }).merge(ood_df, on='fold')
 
-        results_df = pd.DataFrame(rows)
-        oof_df     = pd.concat(oof_rows, ignore_index=True)
+                merged = merged.assign(
+                    dataset=dataset, model=model_name,
+                    perturbation=pert_type, param_key=param_key, param_value=param_val,
+                )
+                metrics_rows.append(merged)
 
-        # riordina colonne OOF
-        proba_cols = [c for c in oof_df.columns if c.startswith('proba_')]
-        oof_df = oof_df[['dataset', 'model', 'perturbation', 'param_value', 'split',
-                          'sample_idx', 'y_true', 'y_pred'] + proba_cols]
+        results_df     = pd.concat(metrics_rows, ignore_index=True)
+        predictions_df = pd.concat(pred_rows, ignore_index=True)
+
+        # riordina colonne
+        results_df = results_df[[
+            'dataset', 'model', 'perturbation', 'param_key', 'param_value', 'fold',
+            'baseline_auroc', 'baseline_f1', 'baseline_prec', 'baseline_rec',
+            'auroc', 'f1', 'prec', 'rec',
+        ]]
+
+        proba_cols     = [c for c in predictions_df.columns if c.startswith('proba_')]
+        predictions_df = predictions_df[[
+            'dataset', 'model', 'perturbation', 'param_value', 'split',
+            'fold', 'sample_idx', 'y_true'
+        ] + proba_cols]
 
         if save_dir:
             out_dir = os.path.join(save_dir, dataset)
             os.makedirs(out_dir, exist_ok=True)
             results_df.to_parquet(os.path.join(out_dir, f"{pert_type}.parquet"), index=False)
-            oof_df.to_parquet(os.path.join(out_dir, f"{pert_type}_predictions.parquet"), index=False)
+            predictions_df.to_parquet(os.path.join(out_dir, f"{pert_type}_predictions.parquet"), index=False)
             print(f"\n  Saved -> {out_dir}/{pert_type}.parquet")
             print(f"  Saved -> {out_dir}/{pert_type}_predictions.parquet")
 
-        return results_df, oof_df
+        return results_df, predictions_df
 
     def plot(
         self,

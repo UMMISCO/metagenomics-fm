@@ -31,6 +31,14 @@ import numpy as np
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
 from data_transformations.check_data_on_fly.data_generator import DataGenerator
 
+def set_seed(n_seed: int = 42):
+    import random
+    import torch
+    random.seed(n_seed)
+    np.random.seed(n_seed)
+    torch.manual_seed(n_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(n_seed)
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
 DATASETS = [
@@ -44,7 +52,7 @@ DATASETS = [
 
 PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 
-N_FEATURES_PROTECT = 2
+N_FEATURES_PROTECT = 5
 SEED               = 42
 SELECTION_METHOD   = 'highest_abundance'  # for remove_features
 
@@ -126,4 +134,5 @@ def main():
 
 
 if __name__ == '__main__':
+    set_seed(42)
     main()

@@ -33,7 +33,8 @@ PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 # Default completo — viene overridato da --models se passato da CLI
 MODEL_LIST_DEFAULT = ['rf', 'tabicl', 'original_v2', 'xgb', 'tabdpt', 'contextab']
 
-SAVE_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_new/'
+SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_new/'
+PRECOMPUTED_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets/'
 
 #%%
 '''
@@ -65,7 +66,7 @@ bench = Benchmarker(data_source='pasolli')
 for dataset in datasets:
     for pert_type in pert_types:
 
-        results_df, oof_df = bench.run_one(
+        results_df, predictions_df = bench.run_one(
             dataset            = dataset,
             pert_type          = pert_type,
             model_names        = MODEL_LIST,
@@ -74,19 +75,18 @@ for dataset in datasets:
             n_features_max     = 100000,
             device             = 'cuda',
             seed               = 42,
+            precomputed_dir    = PRECOMPUTED_DIR,
         )
 
         # Ogni env scrive su un file separato — no race condition
-        env_tag  = '_'.join(MODEL_LIST)
-        out_dir  = os.path.join(SAVE_DIR, dataset)
+        env_tag = '_'.join(MODEL_LIST)
+        out_dir = os.path.join(SAVE_DIR, dataset)
         os.makedirs(out_dir, exist_ok=True)
 
-        # metriche aggregate
-        metrics_path = os.path.join(out_dir, f"{pert_type}__{env_tag}.csv")
-        results_df.to_csv(metrics_path, index=False)
-        print(f"Saved metrics    -> {metrics_path}")
+        metrics_path = os.path.join(out_dir, f"{pert_type}__{env_tag}.parquet")
+        results_df.to_parquet(metrics_path, index=False)
+        print(f"Saved metrics      -> {metrics_path}")
 
-        # predizioni OOF per sample
-        preds_path = os.path.join(out_dir, f"{pert_type}__predictions__{env_tag}.csv")
-        oof_df.to_csv(preds_path, index=False)
-        print(f"Saved predictions-> {preds_path}")
+        preds_path = os.path.join(out_dir, f"{pert_type}__predictions__{env_tag}.parquet")
+        predictions_df.to_parquet(preds_path, index=False)
+        print(f"Saved predictions  -> {preds_path}")
