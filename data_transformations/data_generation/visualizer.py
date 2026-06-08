@@ -67,17 +67,18 @@ class PerturbationVisualizer:
             lim_max = max(x_vals.max(), y_vals.max())
             ax.plot([0, lim_max], [0, lim_max], color='black',
                     linewidth=1, linestyle='--', label='y = x')
-            ax.set_xlabel("Original value", fontsize=9)
-            ax.set_ylabel("Perturbed value", fontsize=9)
-            ax.set_title(label, fontsize=9, fontweight='bold')
+            ax.set_xlabel("Original value", fontsize=14)
+            ax.set_ylabel("Perturbed value", fontsize=14)
+            ax.set_title(label, fontsize=14, fontweight='bold')
+            ax.tick_params(axis='both', labelsize=13)
             ax.grid(True, linestyle="--", alpha=0.3)
-            ax.legend(fontsize=7, frameon=True)
+            ax.legend(fontsize=12, frameon=True)
 
         for idx in range(n, nrows * ncols):
             axes[idx // ncols][idx % ncols].set_visible(False)
 
-        fig.suptitle(title or "Original vs. Perturbations (per perturbation)",
-                     fontsize=12, fontweight='bold')
+        if title:
+            fig.suptitle(title, fontsize=16, fontweight='bold')
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
@@ -183,9 +184,9 @@ class PerturbationVisualizer:
                            s=25, linewidths=0.6, label='protected feature')
                 ax.legend(fontsize=7, frameon=True, title='Class')
 
-            ax.set_xlabel("Original value", fontsize=9)
-            ax.set_ylabel("Perturbed value", fontsize=9)
-            ax.set_title(label, fontsize=9, fontweight='bold')
+            ax.set_xlabel("Original value", fontsize=14)
+            ax.set_ylabel("Perturbed value", fontsize=14)
+            ax.set_title(label, fontsize=14, fontweight='bold')
             ax.grid(True, linestyle="--", alpha=0.3)
 
         for idx in range(n, nrows * ncols):
@@ -282,7 +283,7 @@ class PerturbationVisualizer:
         perturbations: List[Tuple[str, pd.DataFrame]],
         y_labels: pd.Series,
         protected_features: List[str],
-        figsize: Tuple[int, int] = (14, 6),
+        figsize: Tuple[int, int] = (16, 5),
         save_path: Optional[str] = None,
         title: Optional[str] = None,
     ) -> None:
@@ -352,19 +353,20 @@ class PerturbationVisualizer:
 
             ax.set_yscale('symlog', linthresh=1e-4)
             ax.set_xticks(x_positions)
-            ax.set_xticklabels(x_labels, rotation=25, ha='right', fontsize=7)
-            ax.set_title(f"Class {cls}", fontsize=11, fontweight='bold')
-            ax.set_xlabel("Perturbation level", fontsize=9)
+            ax.set_xticklabels(x_labels, rotation=30, ha='right', fontsize=15)
+            ax.tick_params(axis='y', labelsize=15)
+            ax.set_title(f"Class {cls}", fontsize=18, fontweight='bold')
+            ax.set_xlabel("Perturbation level", fontsize=16)
             ax.grid(True, linestyle="--", alpha=0.3, axis='y')
 
             if ax == axes[0]:
-                ax.set_ylabel("Mean feature abundance (symlog scale)", fontsize=10)
-                ax.scatter([], [], color='#c0392b', s=25, label='protected feature')
-                ax.scatter([], [], color='#555555', s=14, alpha=0.7, label='other feature')
-                ax.legend(fontsize=8, frameon=True)
+                ax.set_ylabel("Mean feature abundance (symlog scale)", fontsize=16)
+                ax.scatter([], [], color='#c0392b', s=60, label='protected feature')
+                ax.scatter([], [], color='#555555', s=40, alpha=0.7, label='other feature')
+                ax.legend(fontsize=15, frameon=True)
 
-        fig.suptitle(title or "Feature trajectories across perturbation levels by class",
-                     fontsize=12, fontweight='bold')
+        if title:
+            fig.suptitle(title, fontsize=18, fontweight='bold')
         plt.tight_layout()
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")

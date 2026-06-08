@@ -25,7 +25,13 @@ def open_pasolli(name):
     else:
         mask = df['disease']  == 'n'
 
-    df.loc[:, df.columns != 'sampleID'] = df.loc[:, df.columns != 'sampleID'].apply(pd.to_numeric, errors='coerce')
+    # print(df.columns)
+
+    # Convert ONLY k__* abundance columns to numeric
+    feature_cols = df.filter(like='k__').columns
+    df[feature_cols] = df[feature_cols].apply(pd.to_numeric, errors='coerce')
+
+    # df.loc[:, df.columns != 'sampleID'] = df.loc[:, df.columns != 'sampleID'].apply(pd.to_numeric, errors='coerce')
 
     binary_col = (~mask).astype(int)
     df.insert(0, 'label', binary_col)
@@ -38,5 +44,9 @@ def open_pasolli(name):
         df = df[cols]
 
     y = df['label']
+
+    # NOTE: returning X-only breaks open_and_filter which expects [sampleID, label, features]
+    # X = df.filter(like='k__')
+    # return X, y
 
     return df, y

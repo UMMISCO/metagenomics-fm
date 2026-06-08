@@ -1,7 +1,7 @@
 # Metagenomics Foundation Models
 
 **Author:** Giulia Perciballi 
-**Advisor** Ahmad Fall; Edi PRifti and Jean-Daniel Zucker
+**Advisor** Ahmad Fall; Edi Prifti and Jean-Daniel Zucker
 **Date:** February 2026
 **Affiliation:** UMMISCO
 

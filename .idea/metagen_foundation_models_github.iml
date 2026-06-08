@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
-    <content url="file://$MODULE_DIR$" />
-    <orderEntry type="jdk" jdkName="Remote Python 3.11.7 (sftp://gperciballi@hpc-cng4.ummisco.ioit:22/home/gperciballi/.conda/envs/lab/bin/python)" jdkType="Python SDK" />
+    <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/tabicl/src" isTestSource="false" />
+    </content>
+    <orderEntry type="jdk" jdkName="Remote 3.12 (sftp://gperciballi@hpc-cng4:22/home/gperciballi/miniconda3/envs/lab/bin/python)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">

@@ -29,7 +29,7 @@ import os
 import numpy as np
 
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
-from data_transformations.check_data_on_fly.data_generator import DataGenerator
+from data_transformations.data_generation.data_generator import DataGenerator
 
 def set_seed(n_seed: int = 42):
     import random
@@ -56,7 +56,7 @@ N_FEATURES_PROTECT = 5
 SEED               = 42
 SELECTION_METHOD   = 'highest_abundance'  # for remove_features
 
-SAVE_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets/'
+SAVE_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets_dens/'
 
 # ── ADAPTIVE PARAM GENERATION (same logic as Benchmarker) ────────────────────
 

@@ -8,8 +8,8 @@ from typing import Union
 import numpy as np
 import torch
 
-import pytorch_lightning as L
-L.seed_everything(42)
+# import pytorch_lightning as L
+# L.seed_everything(42)
 
 from sklearn.model_selection import StratifiedKFold, LeaveOneOut
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -33,12 +33,23 @@ import pdb
 if not sys.warnoptions:
     warnings.simplefilter("ignore")
 
+
+def set_seed(n_seed: int = 42):
+    import random
+    import torch
+    random.seed(n_seed)
+    np.random.seed(n_seed)
+    torch.manual_seed(n_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(n_seed)
+
+
 def load_tabfn_model(model_name: str, epoch: int, device: str='cuda'):
-    # if model_name == "context_tab":
-    #     clf = SAP_RPT_OSS_Classifier(max_context_size=8192, bagging=8)
-    #     print("we are using ContextTab model")
-    if model_name == 'tabdpt':
-        clf = TabDPTClassifier(device='cpu')
+    if model_name == "context_tab":
+        clf = SAP_RPT_OSS_Classifier(max_context_size=2048, bagging=1)
+        print("we are using ContextTab model")
+    # if model_name == 'tabdpt':
+    #     clf = TabDPTClassifier(device='cpu')
     elif model_name == 'original_v2':
         from tabpfn import TabPFNClassifier
         clf = TabPFNClassifier(device=device)
@@ -53,8 +64,9 @@ def load_tabfn_model(model_name: str, epoch: int, device: str='cuda'):
         )
         print("we are using RandomForest model")
     elif model_name == 'tabicl':
-        clf = TabICLClassifier(device=device)
+        # clf = TabICLClassifier(device=device)
         # clf = TabICLClassifier(n_estimators=32, norm_methods=["none", "power"], preprocess=True, checkpoint_version="tabicl-classifier-v1.1-0506.ckpt")
+        clf = TabICLClassifier(kv_cache=True)
         print("we are using TabICL model")
     return clf
 
@@ -77,7 +89,7 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
 
     if k_fold:
         # 10-Fold Cross Validation
-        kf = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+        kf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
         split = kf
     else:
         # Leave-One-Out CV
@@ -95,11 +107,14 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
     for train_index, test_index in tqdm(split.split(X, y), ncols=70):
 
         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
-        y_train, y_test = y[train_index], y[test_index]
+        # y_train, y_test = y[train_index], y[test_index]
+        y_train, y_test = y.iloc[train_index], y.iloc[test_index]
 
         if not "openml" in dataset_name:
-            #Filter Train datasets and select the filtered features in Test dataset
-            X_train, y_train = open_and_filter(X_train, th_presence, th_abundance)
+            df_train = pd.concat([
+                pd.DataFrame({'sampleID': X_train.index, 'label': y_train.values},
+                             index=X_train.index),X_train], axis=1)
+            X_train, y_train = open_and_filter(df_train, th_presence, th_abundance)
 
         if X_train.shape[1] > n_features_max:
             selected_features = reduce_features(X_train, y_train, n_features_max)
@@ -117,8 +132,8 @@ def cross_val_results(trained_model_name: str, epoch: Union[int, str], dataset_n
             if isinstance(X_test, pd.DataFrame):
                 X_test = X_test.to_numpy()
 
-        if trained_model_name == 'tabdpt':
-            y_train = np.asarray(y_train)
+        # if trained_model_name == 'tabdpt':
+        #     y_train = np.asarray(y_train)
 
         print('Final dimensions: ', X_train.shape, X_test.shape, type(X_train), type(X_test) )
 
@@ -179,6 +194,8 @@ if __name__ == '__main__':
     import argparse
     import pandas as pd
 
+    set_seed(42)
+
     parser = argparse.ArgumentParser(description='Testing MetagenPFN')
     parser.add_argument('-dev', '--device', type=str,
                         default='cpu')
@@ -216,8 +233,9 @@ if __name__ == '__main__':
         if "abundance" in dataset:
             print(dataset)
             X, y = open_pasolli(dataset)
-            th_abundance = 0.01
-
+            # th_abundance = 0.01
+            th_presence = 0.0
+            th_abundance = 0.0
 
         # elif "metacardis" in dataset:
         #     print(dataset)

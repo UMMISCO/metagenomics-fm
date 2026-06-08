@@ -2,7 +2,6 @@ import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 from typing import Tuple, Optional, List, Union
 
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
@@ -11,8 +10,9 @@ from testing.testing_data.pasolli.pasolli import open_pasolli
 from testing.testing_data.metacardis.metacardis import open_metacardis
 from testing.testing_data.preprocessing.filter_or_logic import open_and_filter
 
-from data_transformations.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, AddRandomFeaturesPerturbation, SparsityPerturbation, DensificationPerturbation, PerturbationStats
-from data_transformations.visualizer import PerturbationVisualizer
+from data_transformations.data_generation.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, \
+    SparsityPerturbation, DensificationPerturbation, PerturbationStats
+from data_transformations.data_generation.visualizer import PerturbationVisualizer
 
 # =============================================================================
 # DATA LOADER
@@ -270,32 +270,6 @@ class DataGenerator:
             save_path=save_path,
             title=base_title,
         )
-
-        # # Plot 2: all perturbations overlaid
-        # self.visualizer.plot_overlay(
-        #     original=self.X_original,
-        #     perturbations=perturbations,
-        #     figsize=(8, 7),
-        #     title=base_title + " (overlay)",
-        # )
-
-        # # Plot 3: colour by class, highlight protected features
-        # self.visualizer.plot_class_and_protected(
-        #     original=self.X_original,
-        #     perturbations=perturbations,
-        #     y_labels=self.y_original,
-        #     protected_features=self.protected_features,
-        #     subplot_size=subplot_size,
-        #     title=base_title + " (by class & protected)",
-        # )
-
-        # # Plot 4: delta distribution by class
-        # self.visualizer.plot_delta_by_class(
-        #     original=self.X_original,
-        #     perturbations=perturbations,
-        #     y_labels=self.y_original,
-        #     title=base_title + " - Delta by class",
-        # )
 
         # Plot 5: per-class feature trajectories across k levels
         self.visualizer.plot_feature_trajectories(

@@ -12,7 +12,7 @@ from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_sco
 from sklearn.feature_selection import SelectKBest, f_classif
 
 sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
-from data_transformations.check_data_on_fly.data_generator import DataGenerator
+from data_transformations.data_generation.data_generator import DataGenerator
 
 warnings.filterwarnings('ignore')
 
@@ -51,6 +51,11 @@ def load_tabfn_model(model_name: str, device: str = 'cuda'):
     elif model_name == 'tabicl':
         from tabicl import TabICLClassifier
         return TabICLClassifier(device=device, use_amp=False)
+        # from tabicl.sklearn.classifier import TabICLClassifier
+        # return TabICLClassifier(model_path="/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/"
+        #                         "tabicl/checkpoints/checkpoints_normalisation/step-5000.ckpt",
+        #                         allow_auto_download=False,
+        #                         checkpoint_version="step-5000.ckpt",device=device)
 
     elif model_name == 'contextab':
         from sap_rpt_oss import SAP_RPT_OSS_Classifier
@@ -100,13 +105,33 @@ def _adaptive_params(pert_type: str, n_features: int, actual_sparsity: float, se
     return []
 
 
+def _clean_taxon_name(name: str) -> str:
+    if '__' in name:
+        last = name.split('|')[-1]
+        clean = last.split('__')[-1]
+        return clean.replace('_', ' ').strip()
+    return name.strip()
+
 def _coerce_inputs(model_name, X_train, X_test, y_train, col_names):
     """Apply model-specific input coercions."""
     if model_name in ('tabdpt', 'xgb'):
         y_train = np.asarray(y_train)
     if model_name == 'contextab':
+
+        ########### PERMUTE COL NAMES
+        # col_names = np.random.default_rng(42).permutation(col_names).tolist()
+        ########### SELECT ONLY SPEIES NAMES
+        # col_names = [_clean_taxon_name(c) for c in col_names]
+        ########### USE ONLY COL INDEXES
+        # n_cols = X_train.shape[1]
+        # idx_names = [str(i) for i in range(n_cols)]
+        # X_train = pd.DataFrame(X_train, columns=idx_names)
+        # print(X_train.head())
+        # X_test = pd.DataFrame(X_test, columns=idx_names)
+        ##########
         X_train = pd.DataFrame(X_train, columns=col_names)
         X_test  = pd.DataFrame(X_test,  columns=col_names)
+
     return X_train, X_test, y_train
 
 
@@ -266,13 +291,14 @@ class Benchmarker:
         pert_type: str,
         model_names: List[str] = None,
         cv: int = 5,
-        n_features_protect: int = 2,
+        # n_features_protect: int = 5,
         n_features_max: int = 100000,
         random_state: int = 42,
         device: str = 'cuda',
         seed: int = 42,
         precomputed_dir: Optional[str] = None,
         save_dir: Optional[str] = None,
+        baseline_only: bool = False,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
         OOD benchmark per una singola combinazione (dataset, perturbation_type).
@@ -293,7 +319,7 @@ class Benchmarker:
 
         gen = DataGenerator(generator_type=pert_type, data_source=self.data_source)
         gen.load_data(dataset)
-        gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
+        # gen.discover_and_protect(method='random_forest', n_features=n_features_protect, verbose=False)
         y = gen.y_original.values
 
         actual_sparsity = float((gen.X_original.values == 0).mean())
@@ -341,6 +367,10 @@ class Benchmarker:
             )
             pred_rows.append(preds_base)
 
+            if baseline_only:
+                metrics_rows.append(baseline_df.assign(dataset=dataset, model=model_name))
+                continue
+
             for params in dataset_params:
                 param_key, param_val = _param_label(params)
 
@@ -375,11 +405,14 @@ class Benchmarker:
         predictions_df = pd.concat(pred_rows, ignore_index=True)
 
         # riordina colonne
-        results_df = results_df[[
-            'dataset', 'model', 'perturbation', 'param_key', 'param_value', 'fold',
-            'baseline_auroc', 'baseline_f1', 'baseline_prec', 'baseline_rec',
-            'auroc', 'f1', 'prec', 'rec',
-        ]]
+        if baseline_only:
+            results_df = results_df[['dataset', 'model', 'fold', 'auroc', 'f1', 'prec', 'rec']]
+        else:
+            results_df = results_df[[
+                'dataset', 'model', 'perturbation', 'param_key', 'param_value', 'fold',
+                'baseline_auroc', 'baseline_f1', 'baseline_prec', 'baseline_rec',
+                'auroc', 'f1', 'prec', 'rec',
+            ]]
 
         proba_cols     = [c for c in predictions_df.columns if c.startswith('proba_')]
         predictions_df = predictions_df[[

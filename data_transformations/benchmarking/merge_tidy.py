@@ -14,10 +14,10 @@ Merges all parquet files produced by benchmarking.py into two big CSVs:
 # =============================================================================
 RESULTS_DIR  = (
     "/data/projects/deepintegromics/analyses/3.tabpfn/"
-    "metagen_foundation_models/data_transformations/benchmark_results_new/"
+    "metagen_foundation_models/data_transformations/benchmark_results_new_final/"
 )
-METRICS_OUT     = "metrics_all.csv"
-PREDICTIONS_OUT = "predictions_all.csv"
+METRICS_OUT     = "metrics_all_final.csv"
+PREDICTIONS_OUT = "predictions_all_final.csv"
 
 MODEL_DISPLAY = {
     "rf":          "RF",

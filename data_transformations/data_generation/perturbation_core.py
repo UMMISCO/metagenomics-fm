@@ -281,63 +281,6 @@ class RemoveFeaturesPerturbation(Perturbation):
         return self._renormalize(X[keep], verbose)
 
 
-class AddRandomFeaturesPerturbation(Perturbation):
-    """
-    Add k synthetic features drawn from a log-normal distribution and renormalize.
-    """
-
-    def apply(
-        self,
-        X: pd.DataFrame,
-        k: Optional[int] = None,
-        min_abundance: float = 1e-4,
-        max_abundance: float = 1e-3,
-        feature_prefix: str = 'random_feature',
-        seed: Optional[int] = None,
-        verbose: bool = True,
-    ) -> pd.DataFrame:
-        """
-        Parameters
-        ----------
-        X : pd.DataFrame  – compositional data
-        k : int           – number of synthetic features to add
-        min_abundance, max_abundance : float
-            95 % of samples will fall within this range (log-normal parametrisation).
-        feature_prefix : str
-        seed : int, optional
-        verbose : bool
-        """
-        if k is None:
-            raise ValueError("'k' (number of features to add) must be provided.")
-        if min_abundance >= max_abundance:
-            raise ValueError("min_abundance must be strictly less than max_abundance.")
-
-        rng = np.random.default_rng(seed)
-        X = X.copy()
-
-        log_min, log_max = np.log(min_abundance), np.log(max_abundance)
-        log_mean = (log_min + log_max) / 2
-        log_std = (log_max - log_min) / 4  # ±2σ covers the range
-
-        random_abundances = rng.lognormal(
-            mean=log_mean, sigma=log_std, size=(X.shape[0], k)
-        )
-        new_cols = [f"{feature_prefix}_{i + 1}" for i in range(k)]
-        new_df = pd.DataFrame(random_abundances, index=X.index, columns=new_cols)
-
-        X_aug = pd.concat([X, new_df], axis=1)
-        X_aug = self._renormalize(X_aug, verbose)
-
-        if verbose:
-            print(f"  Added {k} random features. Shape: {X.shape} → {X_aug.shape}")
-            in_range = (
-                (random_abundances >= min_abundance) & (random_abundances <= max_abundance)
-            ).mean() * 100
-            print(f"  Values in target range [{min_abundance:.1e}, {max_abundance:.1e}]: {in_range:.1f}%")
-
-        return X_aug
-
-
 import numpy as np
 import pandas as pd
 from typing import Optional, Tuple
@@ -400,22 +343,27 @@ class SparsityPerturbation(Perturbation):
 
         # ===============================================================
         # CASE 2: Need FEWER zeros → REMOVE zeros → densify modifiable features
+        # NOTE: This case should never occur in our benchmark since target_sparsity
+        # is always > current_sparsity for SparsityPerturbation.
+        # Densification is handled by DensificationPerturbation instead.
         # ===============================================================
         else:
-            need_to_fill = -delta
-            max_fillable = mod_zeros
+            if verbose:
+                print("  [WARN] target_sparsity < current_sparsity — use DensificationPerturbation instead. Returning X unchanged.")
+            return X
 
-            if need_to_fill > max_fillable:
-                if verbose:
-                    print(f"  [WARN] Cannot fill {need_to_fill} zeros; clipping to {max_fillable}.")
-                need_to_fill = max_fillable
-
-            X = self._fill_exact_zeros(
-                X, need_to_fill,
-                noise_range=noise_range,
-                seed=seed,
-                verbose=verbose,
-            )
+        # need_to_fill = -delta
+        # max_fillable = mod_zeros
+        # if need_to_fill > max_fillable:
+        #     if verbose:
+        #         print(f"  [WARN] Cannot fill {need_to_fill} zeros; clipping to {max_fillable}.")
+        #     need_to_fill = max_fillable
+        # X = self._fill_exact_zeros(
+        #     X, need_to_fill,
+        #     noise_range=noise_range,
+        #     seed=seed,
+        #     verbose=verbose,
+        # )
 
         # ===============================================================
         # Final report
@@ -587,23 +535,49 @@ class DensificationPerturbation(Perturbation):
                 print(f"  [WARN] Only {len(zero_positions)} zeros available; clipping to that.")
             need_to_fill = len(zero_positions)
 
-        # Pool of real non-zero values from non-protected features
-        nonzero_vals = X[modifiable].values.flatten()
-        nonzero_vals = nonzero_vals[nonzero_vals > 0]
+        # OLD APPROACH (global pool — sampling from all non-zero values across all features):
+        # nonzero_vals = X[modifiable].values.flatten()
+        # nonzero_vals = nonzero_vals[nonzero_vals > 0]
+        # chosen_pos = rng.choice(len(zero_positions), size=need_to_fill, replace=False)
+        # fill_values = rng.choice(nonzero_vals, size=need_to_fill, replace=True)
+        # for idx, pos_idx in enumerate(chosen_pos):
+        #     row_i, col_i = zero_positions[pos_idx]
+        #     col_name = mod_cols[col_i]
+        #     X.at[X.index[row_i], col_name] = fill_values[idx]
 
-        if len(nonzero_vals) == 0:
+        # Beginning NEW APPROACH — per-feature distribution:
+        # For each modifiable feature, collect its non-zero values
+        feature_nonzero = {}
+        for col in mod_cols:
+            vals = X[col].values
+            nz = vals[vals > 0]
+            if len(nz) > 0:
+                feature_nonzero[col] = nz
+
+        ##### End new approach
+
+        if len(feature_nonzero) == 0:
             if verbose:
                 print("  [WARN] No non-zero values in non-protected features — cannot densify.")
             return X
 
-        # Sample positions to fill and values to use
+        # Sample positions to fill
         chosen_pos = rng.choice(len(zero_positions), size=need_to_fill, replace=False)
-        fill_values = rng.choice(nonzero_vals, size=need_to_fill, replace=True)
 
-        for idx, pos_idx in enumerate(chosen_pos):
+        for pos_idx in chosen_pos:
             row_i, col_i = zero_positions[pos_idx]
             col_name = mod_cols[col_i]
-            X.at[X.index[row_i], col_name] = fill_values[idx]
+
+            # Sample from the feature-specific distribution
+            # If this feature has no non-zero values, fall back to a random feature's distribution
+            if col_name in feature_nonzero:
+                pool = feature_nonzero[col_name]
+            else:
+                fallback = rng.choice(list(feature_nonzero.keys()))
+                pool = feature_nonzero[fallback]
+
+            fill_val = rng.choice(pool)
+            X.at[X.index[row_i], col_name] = fill_val
 
         X = self._renormalize(X, verbose)
         final_sparsity = float((X == 0).sum().sum() / X.size)
