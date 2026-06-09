@@ -52,22 +52,22 @@ DATASETS = [
 
 Pre-computes all perturbed versions of each dataset and saves them to disk.
 One parquet file per (dataset, perturbation_type, param_value).
-Protected features (selected via ANOVA F-score) are never modified.
+Protected features (selected via ANOVA F-score + RF) are never modified.
 
 ### Perturbation types
 
-**remove_features**
+**remove features**
 Removes the k highest-abundance non-protected features and renormalizes.
 Simulates incomplete sequencing panels or feature dropout.
 - 10 levels: k from 1 to n_features // 2, evenly spaced
 - Selection method: highest_abundance
 
-**sparsity**
+**zero inflation**
 Increases the fraction of zeros by gamma-scaling non-protected feature values.
 Simulates underdetection due to low sequencing depth.
 - 5 levels: target sparsity from current_sparsity to 0.99
 
-**densification**
+**zero imputation**
 Decreases the fraction of zeros by filling them with values sampled from
 each feature's empirical non-zero distribution.
 Simulates improved detection recovering previously undetected species.
@@ -89,11 +89,11 @@ perturbed_datasets_final/
             k=1.parquet
             k=25.parquet
             ...
-        sparsity/
+        zero_inflation/
             original.parquet
             0.812.parquet
             ...
-        densification/
+        zero_imputation/
             original.parquet
             0.649.parquet
             ...
@@ -115,16 +115,16 @@ Already-existing files are skipped. Safe to re-run at any time.
 
 ### Evaluation protocol
 
-OOD evaluation: train on original data, test on perturbed data.
-Both baseline and OOD use 5-fold stratified cross-validation with the same fold splits,
+Robustness evaluation: train (context for TFMs) on original data, test on perturbed data.
+Both baseline and benchmarking use 5-fold stratified cross-validation with the same fold splits,
 enabling paired statistical comparison.
 
 ```
 Baseline : TRAIN original  | TEST original   → measures in-distribution performance
-OOD      : TRAIN original  | TEST perturbed  → measures robustness to perturbation
+Benchmark      : TRAIN original  | TEST perturbed  → measures robustness to perturbation
 ```
 
-### Models
+### Models (To be installed)
 
 | Key           | Model                  | 
 |---------------|------------------------|
@@ -141,16 +141,16 @@ OOD      : TRAIN original  | TEST perturbed  → measures robustness to perturba
 - **F1, Precision, Recall** — secondary metrics
 - **delta_auroc** = baseline_auroc - ood_auroc
 
+### Run - Baseline (No perturbations)
+```bash
+python python test_perturbations.py --models original_v2, tabicl  --baseline_only
+```
+
 ### Run — single job
 
 ```bash
 python test_perturbations.py --dataset abundance_ibd --pert remove_features
 python test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
-```
-
-### Run - Baseline
-```bash
-python python test_perturbations.py --models original_v2, tabicl  --baseline_only
 ```
 
 ### Run — full parallel batch (recommended)
