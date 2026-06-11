@@ -5,8 +5,7 @@ Pre-computes all perturbed versions of each dataset and saves them to disk.
 One parquet file per (dataset, perturbation_type, param_value).
 
 Protected features are determined per-dataset from ablation_protected.csv,
-and selected using ANOVA F-score (SelectKBest) — model-agnostic, no bias
-toward any of the benchmarked models.
+and selected using ANOVA F-score.
 
 Output structure:
     save_dir/

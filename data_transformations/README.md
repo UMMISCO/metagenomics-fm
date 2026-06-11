@@ -1,7 +1,7 @@
 # Microbiome Perturbation Analysis
 
 Pipeline for evaluating TFM robustness on microbiome compositional data
-under controlled perturbations. Seed: 42.
+under controlled perturbations.
 
 ---
 
