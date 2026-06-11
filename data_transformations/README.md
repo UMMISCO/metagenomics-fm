@@ -107,7 +107,7 @@ Each parquet contains all feature columns + a `label` column.
 python generate_perturbed_datasets.py
 ```
 
-Already-existing files are skipped. Safe to re-run at any time.
+Already-existing files are skipped. 
 
 ---
 
@@ -147,6 +147,11 @@ python python test_perturbations.py --models original_v2, tabicl  --baseline_onl
 ```
 
 ### Run — single job
+**Options:**
+
+--pert remove_features, sparsity, densification
+
+--models rf, xgb, tabdpt, original_v2, tabicl, contextab
 
 ```bash
 python test_perturbations.py --dataset abundance_ibd --pert remove_features
@@ -215,7 +220,6 @@ Performs paired DeLong tests comparing baseline AUROC vs OOD AUROC for every
 predicted probabilities aligned across folds.
 
 - Test: DeLong (1988) — paired comparison of correlated AUROCs
-- Multiple testing correction: Benjamini-Hochberg FDR (uncomment in script to enable)
 - Significance threshold: p < 0.05
 
 Output: `statistical_results_final.csv`
@@ -232,13 +236,13 @@ columns: dataset, model, perturbation, param_value,
 ```
 scikit-learn    # RF, ANOVA selection, CV
 xgboost         # XGBoost
-tabpfn          # TabPFN v2          (new_env)
-tabicl          # TabICL             (new_env)
-tabdpt          # TabDPT             (new_env)
-sap_rpt_oss     # ContextTab         (contextab env)
+tabpfn          # TabPFN v2          
+tabicl          # TabICL             
+tabdpt          # TabDPT            
+sap_rpt_oss     # ContextTab        
 pandas
-pyarrow         # parquet I/O
-scipy           # Fisher method
+pyarrow         
+scipy           
 MLstatkit       # DeLong test
 ```
 
@@ -247,13 +251,3 @@ MLstatkit       # DeLong test
 ## Reproducibility
 
 All scripts use seed 42.
-
-```python
-def set_seed(n_seed=42):
-    import random, torch
-    random.seed(n_seed)
-    np.random.seed(n_seed)
-    torch.manual_seed(n_seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(n_seed)
-```

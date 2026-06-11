@@ -94,23 +94,6 @@ def delong_test(y_true, y_score_baseline, y_score_ood):
     return auc1, auc2, p
 
 
-def fdr_correction(pvalues, alpha=0.05):
-    """
-    Benjamini-Hochberg FDR correction.
-    Ritorna (rejected, pvalues_corrected).
-    """
-    n = len(pvalues)
-    idx = np.argsort(pvalues)
-    sorted_p = np.array(pvalues)[idx]
-    corrected = np.minimum(1, sorted_p * n / (np.arange(n) + 1))
-    # monotonicity
-    for i in range(n - 2, -1, -1):
-        corrected[i] = min(corrected[i], corrected[i + 1])
-    result = np.empty(n)
-    result[idx] = corrected
-    return result
-
-
 # =============================================================================
 # MAIN
 # =============================================================================
