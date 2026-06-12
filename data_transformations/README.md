@@ -8,22 +8,23 @@ under controlled perturbations.
 ## Repository Structure
 
 ```
-data_generation/
-    data_generator.py               # DataGenerator — load, perturb, visualize
-    perturbation_core.py            # Perturbation classes + PerturbationStats
-    generate_perturbed_datasets.py  # Pre-compute and save all perturbed parquets
-
-benchmarking/
-    benchmarking.py                 # Benchmarker — OOD cross-validation
-    test_perturbations.py           # Entry point for one (dataset, pert_type) job
-    run_all.sh                      # Parallel launcher across 4 GPUs
-    merge_tidy.py                   # Merge result parquets into flat CSVs
-    statistical_test.py             # DeLong test + FDR correction
-
 data_transformations/
-    ablation_protected.csv          # Per-dataset n_features_protect
-    perturbed_datasets_final/       # Output of generate_perturbed_datasets.py
-    benchmark_results_new_final/    # Output of test_perturbations.py
+    data_generation/
+        select_protected_features.py  # Step 0 — select protected features per dataset
+        generate_perturbed_datasets.py  # Step 1 — pre-compute all perturbed parquets
+        data_generator.py             # DataGenerator — load, perturb, visualize
+        perturbation_core.py          # Perturbation classes + PerturbationStats
+
+    benchmarking/
+        benchmarking.py               # Benchmarker — OOD cross-validation
+        test_perturbations.py         # Entry point for one (dataset, pert_type) job
+        run_all.sh                    # Parallel launcher across 4 GPUs
+        merge_tidy.py                 # Merge result parquets into flat CSVs
+        statistical_test.py           # DeLong test + FDR correction
+
+    ablation_protected.csv            # Per-dataset n_features_protect (output of Step 0)
+    perturbed_datasets_final/         # Output of Step 1
+    benchmark_results_new_final/      # Output of benchmarking
 ```
 
 ---
@@ -46,13 +47,28 @@ DATASETS = [
 
 ---
 
+## Step 0 — Select Protected Features
+
+For each dataset, determines how many top-ranked features (by ANOVA F-score) must
+be excluded from perturbation to preserve predictive signal.
+Runs RF cross-validation iteratively, removing one more top feature each time,
+until AUROC drops by >= 3%. Saves results to `ablation_protected.csv`.
+
+**Must be run before Step 1.**
+
+```bash
+python data_transformations/data_generation/select_protected_features.py
+```
+
+---
+
 ## Part 1 — Data Generation
 
 ### Overview
 
 Pre-computes all perturbed versions of each dataset and saves them to disk.
 One parquet file per (dataset, perturbation_type, param_value).
-Protected features (selected via ANOVA F-score + RF) are never modified.
+Protected features (from `ablation_protected.csv`) are never modified.
 
 ### Perturbation types
 
@@ -104,10 +120,10 @@ Each parquet contains all feature columns + a `label` column.
 ### Run
 
 ```bash
-python generate_perturbed_datasets.py
+python data_transformations/data_generation/generate_perturbed_datasets.py
 ```
 
-Already-existing files are skipped. 
+Already-existing files are skipped.
 
 ---
 
@@ -143,7 +159,7 @@ Benchmark      : TRAIN original  | TEST perturbed  → measures robustness to pe
 
 ### Run - Baseline (No perturbations)
 ```bash
-python python test_perturbations.py --models original_v2, tabicl  --baseline_only
+python data_transformations/benchmarking/test_perturbations.py --models original_v2,tabicl --baseline_only
 ```
 
 ### Run — single job
@@ -154,14 +170,14 @@ python python test_perturbations.py --models original_v2, tabicl  --baseline_onl
 --models rf, xgb, tabdpt, original_v2, tabicl, contextab
 
 ```bash
-python test_perturbations.py --dataset abundance_ibd --pert remove_features
-python test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
+python data_transformations/benchmarking/test_perturbations.py --dataset abundance_ibd --pert remove_features
+python data_transformations/benchmarking/test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
 ```
 
 ### Run — full parallel batch (recommended)
 
 ```bash
-bash run_all.sh
+bash data_transformations/benchmarking/run_all.sh
 ```
 
 Launches 36 parallel jobs (6 datasets × 3 perturbations × 2 environments)
@@ -189,7 +205,7 @@ benchmark_results_new_final/
 ### Merge results
 
 ```bash
-python merge_tidy.py
+python data_transformations/benchmarking/merge_tidy.py
 ```
 
 Scans all parquets under `benchmark_results_new_final/`, deduplicates,
@@ -212,7 +228,7 @@ MODEL_DISPLAY = {
 ### Statistical testing
 
 ```bash
-python statistical_test.py
+python data_transformations/benchmarking/statistical_test.py
 ```
 
 Performs paired DeLong tests comparing baseline AUROC vs OOD AUROC for every
