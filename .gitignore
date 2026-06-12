@@ -1,5 +1,53 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-.DS_Store
+*.egg-info/
+dist/
+build/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# ── data_transformations: output generati a runtime ──────────────────────────
+data_transformations/benchmark_results*/
+data_transformations/perturbed_datasets*/
+data_transformations/plots/
+data_transformations/plots_delta/
+data_transformations/plot_paper/
+data_transformations/logs*/
+data_transformations/results/
+data_transformations/stats_results/
+data_transformations/paper/
+
+# ── analyses: plot output ─────────────────────────────────────────────────────
+analyses/plots/
+
+# ── tabicl: checkpoints e log wandb (file binari/macchina-specifici) ─────────
+tabicl/checkpoints/
+tabicl/src/tabicl/checkpoints/
+tabicl/wandb/
+
+# ── foundation_models: checkpoint e artefatti di training ────────────────────
+foundation_models/mothernet/checkpoints/
+foundation_models/src/tabicl_original/checkpoints/
+
+# Binary outputs
 *.parquet
+*.pt
+*.ckpt
+
+# Environment / secrets
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

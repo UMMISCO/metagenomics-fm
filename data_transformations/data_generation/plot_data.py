@@ -2,27 +2,22 @@
 
 import os
 import sys
+import pathlib
 import glob
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from sklearn.feature_selection import SelectKBest, f_classif
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 from data_transformations.data_generation.data_generator import DataGenerator
 
-SAVE_DIR = (
-    '/data/projects/deepintegromics/analyses/3.tabpfn/'
-    'metagen_foundation_models/data_transformations/perturbed_datasets_final/'
-)
-ABLATION_CSV = (
-    '/data/projects/deepintegromics/analyses/3.tabpfn/'
-    'metagen_foundation_models/data_transformations/ablation_protected.csv'
-)
-PLOT_DIR = (
-    '/data/projects/deepintegromics/analyses/3.tabpfn/'
-    'metagen_foundation_models/data_transformations/plot_paper/'
-)
+_DT_DIR      = pathlib.Path(__file__).resolve().parents[1]   # data_transformations/
+SAVE_DIR     = str(_DT_DIR / 'perturbed_datasets_final')
+ABLATION_CSV = str(_DT_DIR / 'ablation_protected.csv')
+PLOT_DIR     = str(_DT_DIR / 'plot_paper')
 
 DATASETS = [
     'abundance_cirrhosis--stagediscovery',

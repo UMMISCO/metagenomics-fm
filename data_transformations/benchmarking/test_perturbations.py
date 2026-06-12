@@ -1,11 +1,16 @@
 #%%
 import os
 import sys
+import pathlib
 import argparse
 import numpy as np
 import pandas as pd
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]   # metagen_foundation_models/
+_HERE = pathlib.Path(__file__).resolve().parent        # data_transformations/benchmarking/
+for _p in [str(_ROOT), str(_HERE)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 from benchmarking import Benchmarker
 
 def set_seed(n_seed: int = 42):
@@ -34,8 +39,9 @@ PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 # Default completo — viene overridato da --models se passato da CLI
 MODEL_LIST_DEFAULT = ['rf', 'tabicl', 'original_v2', 'xgb', 'tabdpt', 'contextab']
 
-SAVE_DIR        = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_new_final/'
-PRECOMPUTED_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets_final/'
+_DT_DIR         = pathlib.Path(__file__).resolve().parents[1]   # data_transformations/
+SAVE_DIR        = str(_DT_DIR / 'benchmark_results_new_final')
+PRECOMPUTED_DIR = str(_DT_DIR / 'perturbed_datasets_final')
 
 #%%
 '''

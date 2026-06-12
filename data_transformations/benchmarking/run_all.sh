@@ -9,9 +9,10 @@
 # Usage: bash run_all.sh
 # =============================================================================
 
-SCRIPT="test_perturbations.py"
-LOG_DIR="logs_final"
-SAVE_DIR="/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results_new_final/"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$SCRIPT_DIR/test_perturbations.py"
+LOG_DIR="$SCRIPT_DIR/logs_final"
+SAVE_DIR="$SCRIPT_DIR/../benchmark_results_new_final"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$SAVE_DIR"

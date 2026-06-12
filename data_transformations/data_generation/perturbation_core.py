@@ -1,9 +1,12 @@
 import sys
+import pathlib
 import numpy as np
 import pandas as pd
 from typing import Tuple, Optional, List, Union
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 # =============================================================================
 # FEATURE SELECTION MODULE

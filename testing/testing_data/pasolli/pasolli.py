@@ -1,12 +1,15 @@
+import os
 import pandas as pd
 import numpy as np
 
 
 def open_pasolli(name):
 
-    dir = "/data/projects/deepintegromics/analyses/3.tabpfn/metaml/data/"
-    # dir = "/lustre/fswork/projects/rech/hyd/uzt44fk/Tab_ICL/pasolli_data/data/"
-    df = pd.read_csv(dir + f"{name}.txt", sep="\t")
+    _default = os.path.join(
+        os.path.dirname(__file__), '..', '..', '..', '..', '..', '..', 'metaml', 'data'
+    )
+    data_dir = os.environ.get('PASOLLI_DATA_DIR', os.path.normpath(_default))
+    df = pd.read_csv(os.path.join(data_dir, f"{name}.txt"), sep="\t")
 
     idx = df.iloc[:, 0]
     df.index = idx

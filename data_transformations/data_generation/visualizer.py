@@ -1,11 +1,14 @@
 import sys
+import pathlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Tuple, Optional, List, Union
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from testing.testing_data.pasolli.pasolli import open_pasolli
 from testing.testing_data.metacardis.metacardis import open_metacardis

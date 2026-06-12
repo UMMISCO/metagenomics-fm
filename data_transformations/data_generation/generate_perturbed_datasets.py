@@ -5,7 +5,8 @@ Pre-computes all perturbed versions of each dataset and saves them to disk.
 One parquet file per (dataset, perturbation_type, param_value).
 
 Protected features are determined per-dataset from ablation_protected.csv,
-and selected using ANOVA F-score.
+and selected using ANOVA F-score (SelectKBest) — model-agnostic, no bias
+toward any of the benchmarked models.
 
 Output structure:
     save_dir/
@@ -24,12 +25,15 @@ Output structure:
 
 import sys
 import os
+import pathlib
 import numpy as np
 import pandas as pd
 
 from sklearn.feature_selection import SelectKBest, f_classif
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 from data_transformations.data_generation.data_generator import DataGenerator
 
 
@@ -59,8 +63,9 @@ PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
 SEED             = 42
 SELECTION_METHOD = 'highest_abundance'  # for remove_features
 
-ABLATION_CSV = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/ablation_protected.csv'
-SAVE_DIR     = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets_final/'
+_DT_DIR      = pathlib.Path(__file__).resolve().parents[1]   # data_transformations/
+ABLATION_CSV = str(_DT_DIR / 'ablation_protected.csv')
+SAVE_DIR     = str(_DT_DIR / 'perturbed_datasets_final')
 
 
 # ── LOAD PER-DATASET N_FEATURES_PROTECT ──────────────────────────────────────

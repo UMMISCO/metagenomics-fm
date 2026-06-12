@@ -26,9 +26,12 @@ Output structure:
 
 import sys
 import os
+import pathlib
 import numpy as np
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 from data_transformations.data_generation.data_generator import DataGenerator
 
 def set_seed(n_seed: int = 42):
@@ -56,7 +59,7 @@ N_FEATURES_PROTECT = 5
 SEED               = 42
 SELECTION_METHOD   = 'highest_abundance'  # for remove_features
 
-SAVE_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/perturbed_datasets_dens/'
+SAVE_DIR = str(pathlib.Path(__file__).resolve().parent / 'perturbed_datasets_dens')
 
 # ── ADAPTIVE PARAM GENERATION (same logic as Benchmarker) ────────────────────
 

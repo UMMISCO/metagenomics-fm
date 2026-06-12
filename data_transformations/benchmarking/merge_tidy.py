@@ -12,10 +12,8 @@ Merges all parquet files produced by benchmarking.py into two big CSVs:
 # =============================================================================
 # CONFIG
 # =============================================================================
-RESULTS_DIR  = (
-    "/data/projects/deepintegromics/analyses/3.tabpfn/"
-    "metagen_foundation_models/data_transformations/benchmark_results_new_final/"
-)
+import pathlib as _pl
+RESULTS_DIR = str(_pl.Path(__file__).resolve().parents[1] / 'benchmark_results_new_final')
 METRICS_OUT     = "metrics_all_final.csv"
 PREDICTIONS_OUT = "predictions_all_final.csv"
 

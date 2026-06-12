@@ -10,7 +10,8 @@ import argparse
 import pandas as pd
 import numpy as np
 
-RESULTS_DIR = '/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/data_transformations/benchmark_results/'
+import pathlib as _pl
+RESULTS_DIR = str(_pl.Path(__file__).resolve().parent / 'benchmark_results')
 OUTPUT_FILE = 'latex_tables.tex'
 
 MODEL_DISPLAY = {

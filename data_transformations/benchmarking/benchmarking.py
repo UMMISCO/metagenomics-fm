@@ -1,5 +1,6 @@
 import os
 import sys
+import pathlib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,7 +12,9 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from sklearn.feature_selection import SelectKBest, f_classif
 
-sys.path.append('/data/projects/deepintegromics/analyses/3.tabpfn/metagen_foundation_models/')
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 from data_transformations.data_generation.data_generator import DataGenerator
 
 warnings.filterwarnings('ignore')
