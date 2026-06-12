@@ -17,8 +17,11 @@ SAVE_DIR="$SCRIPT_DIR/../benchmark_results_new_final"
 mkdir -p "$LOG_DIR"
 mkdir -p "$SAVE_DIR"
 
-PYTHON_NEW_ENV="/opt/conda/bin/python"
-PYTHON_CONTEXTAB="/home/gperciballi/.conda/envs/contextab/bin/python"
+# Override these with env vars if needed, e.g.:
+#   export PYTHON_NEW_ENV=/path/to/env/bin/python
+#   export PYTHON_CONTEXTAB=/path/to/contextab/bin/python
+PYTHON_NEW_ENV="${PYTHON_NEW_ENV:-python3}"
+PYTHON_CONTEXTAB="${PYTHON_CONTEXTAB:-python3}"
 
 DATASETS=(
     "abundance_cirrhosis--stagediscovery"
