@@ -51,3 +51,6 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+.idea/
+data_transformations/paper/
+data_transformations/plots/
