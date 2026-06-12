@@ -31,10 +31,10 @@ import pandas as pd
 
 from sklearn.feature_selection import SelectKBest, f_classif
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from data_transformations.data_generation.data_generator import DataGenerator
+fromdata_generation.data_generator import DataGenerator
 
 
 def set_seed(n_seed: int = 42):

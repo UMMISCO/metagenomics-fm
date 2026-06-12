@@ -6,13 +6,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Tuple, Optional, List, Union
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from data_transformations.datasets.pasolli.pasolli import open_pasolli
-from data_transformations.datasets.metacardis.metacardis import open_metacardis
-from data_transformations.datasets.preprocessing.filter_or_logic import open_and_filter
+fromdatasets.pasolli.pasolli import open_pasolli
+fromdatasets.metacardis.metacardis import open_metacardis
+fromdatasets.preprocessing.filter_or_logic import open_and_filter
 
 # =============================================================================
 # VISUALIZATION MODULE

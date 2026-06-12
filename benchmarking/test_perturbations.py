@@ -6,7 +6,7 @@ import argparse
 import numpy as np
 import pandas as pd
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]   # metagen_foundation_models/
+_ROOT = pathlib.Path(__file__).resolve().parents[1]   # metagen_foundation_models/
 _HERE = pathlib.Path(__file__).resolve().parent        # data_transformations/benchmarking/
 for _p in [str(_ROOT), str(_HERE)]:
     if _p not in sys.path:

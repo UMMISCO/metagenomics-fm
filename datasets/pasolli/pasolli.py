@@ -3,7 +3,7 @@ import pathlib
 import pandas as pd
 import numpy as np
 
-_DATA_DIR = pathlib.Path(__file__).resolve().parents[2] / 'data'
+_DATA_DIR = pathlib.Path(__file__).resolve().parents[1] / 'data'
 
 
 def open_pasolli(name):

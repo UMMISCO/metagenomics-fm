@@ -9,10 +9,10 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_selection import SelectKBest, f_classif
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from data_transformations.data_generation.data_generator import DataGenerator
+fromdata_generation.data_generator import DataGenerator
 
 _DT_DIR      = pathlib.Path(__file__).resolve().parents[1]   # data_transformations/
 SAVE_DIR     = str(_DT_DIR / 'perturbed_datasets_final')

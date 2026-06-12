@@ -12,10 +12,10 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 from sklearn.feature_selection import SelectKBest, f_classif
 
-_ROOT = pathlib.Path(__file__).resolve().parents[2]
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-from data_transformations.data_generation.data_generator import DataGenerator
+fromdata_generation.data_generator import DataGenerator
 
 warnings.filterwarnings('ignore')
 
