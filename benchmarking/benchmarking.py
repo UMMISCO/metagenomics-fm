@@ -19,11 +19,6 @@ from data_generation.data_generator import DataGenerator
 
 warnings.filterwarnings('ignore')
 
-
-# =============================================================================
-# MODEL LOADING
-# =============================================================================
-
 def load_tabfn_model(model_name: str, device: str = 'cuda'):
     print(f"  [DEBUG] Loading {model_name} on device={device}")
 
@@ -67,10 +62,6 @@ def load_tabfn_model(model_name: str, device: str = 'cuda'):
     else:
         raise ValueError(f"Unknown model: {model_name}")
 
-
-# =============================================================================
-# HELPERS
-# =============================================================================
 
 def _reduce_features(X_train: np.ndarray, y_train: np.ndarray, n_features_max: int) -> np.ndarray:
     selector = SelectKBest(f_classif, k=n_features_max)
@@ -277,11 +268,6 @@ def _cv_scores_ood(
     } for i in range(cv)])
 
     return metrics_df, predictions_df
-
-
-# =============================================================================
-# BENCHMARKER
-# =============================================================================
 
 class Benchmarker:
 
