@@ -174,7 +174,7 @@ python data_transformations/benchmarking/test_perturbations.py --dataset abundan
 python data_transformations/benchmarking/test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
 ```
 
-### Run — full parallel batch (recommended)
+### Run — Full reproduction (HPC, multi-GPU)
 
 ```bash
 bash data_transformations/benchmarking/run_all.sh
