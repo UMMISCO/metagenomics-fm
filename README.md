@@ -140,7 +140,7 @@ Baseline : TRAIN original  | TEST original   → measures in-distribution perfor
 Benchmark      : TRAIN original  | TEST perturbed  → measures robustness to perturbation
 ```
 
-### Models (To be installed)
+### Models (require separate package installation)
 
 | Key           | Model                  | 
 |---------------|------------------------|
