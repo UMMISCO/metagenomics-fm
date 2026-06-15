@@ -12,7 +12,7 @@ from sklearn.feature_selection import SelectKBest, f_classif
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
-fromdata_generation.data_generator import DataGenerator
+from data_generation.data_generator import DataGenerator
 
 _DT_DIR      = pathlib.Path(__file__).resolve().parents[1]   # data_transformations/
 SAVE_DIR     = str(_DT_DIR / 'perturbed_datasets_final')

@@ -9,13 +9,13 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-fromdatasets.pasolli.pasolli import open_pasolli
-fromdatasets.metacardis.metacardis import open_metacardis
-fromdatasets.preprocessing.filter_or_logic import open_and_filter
+from sets.pasolli.pasolli import open_pasolli
+from sets.metacardis.metacardis import open_metacardis
+from sets.preprocessing.filter_or_logic import open_and_filter
 
-fromdata_generation.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, \
+from data_generation.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, \
     SparsityPerturbation, DensificationPerturbation, PerturbationStats
-fromdata_generation.visualizer import PerturbationVisualizer
+from data_generation.visualizer import PerturbationVisualizer
 
 # =============================================================================
 # DATA LOADER
