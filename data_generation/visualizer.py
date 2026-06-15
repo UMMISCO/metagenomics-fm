@@ -10,13 +10,10 @@ _ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from sets.pasolli.pasolli import open_pasolli
-from sets.metacardis.metacardis import open_metacardis
-from sets.preprocessing.filter_or_logic import open_and_filter
+from datasets.pasolli.pasolli import open_pasolli
+from datasets.preprocessing.filter_or_logic import open_and_filter
 
-# =============================================================================
 # VISUALIZATION MODULE
-# =============================================================================
 
 class PerturbationVisualizer:
     """
@@ -36,9 +33,8 @@ class PerturbationVisualizer:
         y_vals = X_pert[shared_cols].values.flatten().astype(float)
         return x_vals, y_vals, shared_cols
 
-    # ------------------------------------------------------------------
     # Plot 1: one subplot per perturbation
-    # ------------------------------------------------------------------
+
     def plot_per_perturbation(
         self,
         original: pd.DataFrame,
@@ -87,9 +83,8 @@ class PerturbationVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
-    # ------------------------------------------------------------------
     # Plot 2: all perturbations overlaid, colour = perturbation level
-    # ------------------------------------------------------------------
+
     def plot_overlay(
         self,
         original: pd.DataFrame,
@@ -127,9 +122,8 @@ class PerturbationVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
-    # ------------------------------------------------------------------
     # Plot 3: colour = sample class, black ring = protected feature
-    # ------------------------------------------------------------------
+
     def plot_class_and_protected(
         self,
         original: pd.DataFrame,
@@ -202,9 +196,9 @@ class PerturbationVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
-    # ------------------------------------------------------------------
+
     # Plot 4: distribution of (perturbed - original) split by class
-    # ------------------------------------------------------------------
+
     def plot_delta_by_class(
         self,
         original: pd.DataFrame,
@@ -276,10 +270,8 @@ class PerturbationVisualizer:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
         plt.show()
 
-
-    # ------------------------------------------------------------------
     # Plot 5: per-class feature trajectory across perturbation levels
-    # ------------------------------------------------------------------
+
     def plot_feature_trajectories(
         self,
         original: pd.DataFrame,

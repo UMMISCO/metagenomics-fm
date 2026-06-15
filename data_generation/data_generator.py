@@ -10,7 +10,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from datasets.pasolli.pasolli import open_pasolli
-from datasets.metacardis.metacardis import open_metacardis
+# from datasets.metacardis.metacardis import open_metacardis
 from datasets.preprocessing.filter_or_logic import open_and_filter
 
 from data_generation.perturbation_core import FeatureSelector, Perturbation, RemoveFeaturesPerturbation, \
