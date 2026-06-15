@@ -14,10 +14,10 @@ Output structure:
             remove_features/
                 k=1.parquet
                 ...
-            sparsity/
+            zero_inflation/
                 0.812.parquet
                 ...
-            densification/
+            zero_imputation/
                 0.649.parquet
                 ...
         ...
@@ -58,7 +58,7 @@ DATASETS = [
     'abundance_WT2D',
 ]
 
-PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
+PERTURBATION_TYPES =  ['remove_features', 'zero_inflation', 'zero_imputation']
 
 SEED             = 42
 SELECTION_METHOD = 'highest_abundance'  # for remove_features
@@ -102,10 +102,10 @@ def get_params(pert_type: str, n_features: int, actual_sparsity: float):
         k_max    = max(1, n_features // 2)
         k_values = [int(k) for k in np.linspace(1, k_max, 10)]
         return [{'k': k, 'selection_method': SELECTION_METHOD, 'seed': SEED} for k in k_values]
-    elif pert_type == 'sparsity':
+    elif pert_type == 'zero_inflation':
         sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.99, 7)[1:-1]]
         return [{'target_sparsity': s, 'seed': SEED} for s in sparsity_values]
-    elif pert_type == 'densification':
+    elif pert_type == 'zero_imputation':
         sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.01, 7)[1:-1]]
         return [{'target_sparsity': s, 'seed': SEED} for s in sparsity_values]
     return []
@@ -114,7 +114,7 @@ def get_params(pert_type: str, n_features: int, actual_sparsity: float):
 def param_to_filename(pert_type: str, params: dict) -> str:
     if pert_type == 'remove_features':
         return f"k={params['k']}.parquet"
-    elif pert_type in ('sparsity', 'densification'):
+    elif pert_type in ('zero_inflation', 'zero_imputation'):
         return f"{params['target_sparsity']}.parquet"
     return "params.parquet"
 

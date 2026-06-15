@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# run_all.sh — lancia 18 job × 2 env in parallelo su 4 GPU
+# run_all.sh — launches 18 job × 2 env in parallel on 4 GPU
 #
 # Environments:
 #   new_env   → rf, tabicl, original_v2, xgb, tabdpt (cpu)
@@ -17,9 +17,6 @@ SAVE_DIR="$SCRIPT_DIR/../benchmark_results_new_final"
 mkdir -p "$LOG_DIR"
 mkdir -p "$SAVE_DIR"
 
-# Override these with env vars if needed, e.g.:
-#   export PYTHON_NEW_ENV=/path/to/env/bin/python
-#   export PYTHON_CONTEXTAB=/path/to/contextab/bin/python
 PYTHON_NEW_ENV="${PYTHON_NEW_ENV:-python3}"
 PYTHON_CONTEXTAB="${PYTHON_CONTEXTAB:-python3}"
 
@@ -31,7 +28,7 @@ DATASETS=(
     "abundance_t2d"
     "abundance_WT2D"
 )
-PERTS=("remove_features" "sparsity" "densification")
+PERTS=("remove_features" "zero_inflation" "zero_imputation")
 
 GPU=0
 
@@ -66,10 +63,10 @@ for ds in "${DATASETS[@]}"; do
 done
 
 echo ""
-echo "Tutti i job lanciati (18 dataset×pert × 2 env = 36 processi)"
-echo "Monitora con:  tail -f logs/*.log"
-echo "Controlla KO:  grep -rl 'Error\|Traceback' logs/"
+echo "All jobs launched (18 dataset×pert × 2 env = 36 processes)"
+echo "Monitor with:  tail -f logs_final/*.log"
+echo "Check for failures:  grep -rl 'Error\|Traceback' logs_final/"
 wait
 echo ""
-echo "Done! Verifica risultati:"
+echo "Done! Check results:"
 echo "  python merge_tidy.py --results_dir $SAVE_DIR"

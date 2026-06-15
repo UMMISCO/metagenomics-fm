@@ -28,7 +28,7 @@ DATASETS = [
     'abundance_WT2D',
 ]
 
-PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
+PERTURBATION_TYPES =  ['remove_features', 'zero_inflation', 'zero_imputation']
 
 
 # %% Helper — ANOVA protected features
@@ -122,7 +122,7 @@ def visualize(dataset, pert_type):
 
 # %% Run — single dataset/perturbation (edit as needed)
 
-visualize('abundance_WT2D', 'sparsity')
+visualize('abundance_WT2D', 'zero_inflation')
 
 
 # %% Run — loop over all datasets and perturbation types

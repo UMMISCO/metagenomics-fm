@@ -17,9 +17,7 @@ from data_generation.perturbation_core import FeatureSelector, Perturbation, Rem
     SparsityPerturbation, DensificationPerturbation, PerturbationStats
 from data_generation.visualizer import PerturbationVisualizer
 
-# =============================================================================
 # DATA LOADER
-# =============================================================================
 
 class DataLoader:
     """
@@ -68,24 +66,13 @@ class DataLoader:
         return X, y
 
 
-# =============================================================================
 # ORCHESTRATOR (DataGenerator)
-# =============================================================================
 
 class DataGenerator:
     """
     Orchestrates loading, feature selection, perturbation, and visualisation
     of microbiome compositional data.
 
-    Modules
-    -------
-    loader      : DataLoader
-    selector    : FeatureSelector  (set after load_data)
-    perturbation: one of RemoveFeaturesPerturbation |
-                          AddRandomFeaturesPerturbation |
-                          SparsityPerturbation
-    stats       : PerturbationStats
-    visualizer  : PerturbationVisualizer
 
     Quick start
     -----------
@@ -100,13 +87,13 @@ class DataGenerator:
 
     _GENERATOR_MAP = {
         'remove_features':   RemoveFeaturesPerturbation,
-        'sparsity':          SparsityPerturbation,
-        'densification':     DensificationPerturbation,
+        'zero_inflation':          SparsityPerturbation,
+        'zero_imputation':     DensificationPerturbation,
     }
 
     def __init__(
         self,
-        generator_type: str = 'sparsity',
+        generator_type: str = 'zero_inflation',
         data_source: str = 'pasolli',
         dataset_name: Optional[str] = None,
         filter_params: Optional[Tuple[float, float]] = None,
@@ -134,18 +121,16 @@ class DataGenerator:
         self.stats_module = PerturbationStats()
         self.visualizer = PerturbationVisualizer()
 
-    # ------------------------------------------------------------------
     # Internal helper: current perturbation object (respects protected_features)
-    # ------------------------------------------------------------------
+
     def _make_perturbation(self) -> Perturbation:
         cls = self._GENERATOR_MAP.get(self.generator_type)
         if cls is None:
             raise ValueError(f"No perturbation class for '{self.generator_type}'.")
         return cls(protected_features=self.protected_features)
 
-    # ------------------------------------------------------------------
     # Data loading
-    # ------------------------------------------------------------------
+
     def load_data(
         self,
         dataset_name: Optional[str] = None,
@@ -168,9 +153,8 @@ class DataGenerator:
         print(f"Loaded '{dataset_name}': {X.shape[0]} samples, {X.shape[1]} features (rows renormalised to sum to 1).")
         return X, y
 
-    # ------------------------------------------------------------------
     # Feature discovery / protection
-    # ------------------------------------------------------------------
+
     def discover_informative_features(
         self,
         method: str = 'random_forest',
@@ -207,9 +191,9 @@ class DataGenerator:
         print(f"\n✅ {len(features)} features marked as PROTECTED (will not be modified).\n")
         return features
 
-    # ------------------------------------------------------------------
+
     # Generation
-    # ------------------------------------------------------------------
+
     def generate(
         self,
         X: Optional[pd.DataFrame] = None,
@@ -228,9 +212,8 @@ class DataGenerator:
 
         return self._make_perturbation().apply(X, **params)
 
-    # ------------------------------------------------------------------
     # Visualization
-    # ------------------------------------------------------------------
+
     def visualize_perturbations(
         self,
         perturbation_params: List[dict],
@@ -283,9 +266,8 @@ class DataGenerator:
             title=base_title + " - Feature trajectories by class",
         )
 
-    # ------------------------------------------------------------------
     # Statistics comparison
-    # ------------------------------------------------------------------
+
     def compare_perturbation_statistics(
         self,
         perturbation_params: List[dict],
@@ -338,9 +320,8 @@ class DataGenerator:
         return stats_df
 
 
-    # ------------------------------------------------------------------
     # Classification performance vs perturbation level
-    # ------------------------------------------------------------------
+
     def evaluate_classifier_performance(
             self,
             perturbation_params: List[dict],
@@ -434,9 +415,8 @@ class DataGenerator:
         print(results_df.to_string(index=False))
         return results_df
 
-    # ------------------------------------------------------------------
     # Internal guards
-    # ------------------------------------------------------------------
+
     def _require_data(self) -> None:
         if self.X_original is None or self.y_original is None:
             raise RuntimeError("No data loaded. Call load_data() first.")

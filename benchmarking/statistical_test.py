@@ -31,7 +31,7 @@ def main():
 
     rows = []
     total = len(groups)
-    print(f"\nCalcolo DeLong test per {total} combinazioni...")
+    print(f"\n DeLong test for {total} combinations...")
 
     for i, ((dataset, model, perturbation, param_value), ood_group) in enumerate(groups):
         if (i + 1) % 50 == 0:
@@ -44,7 +44,6 @@ def main():
             (df_base['perturbation'] == perturbation)
         ]
 
-        # join su (sample_idx, fold, y_true) → 96 campioni OOF
         merged = ood_group.merge(
             base_all[['fold', 'sample_idx', 'y_true', 'proba_class1']],
             on=['fold', 'sample_idx', 'y_true'],
@@ -88,9 +87,9 @@ def main():
     results['significant'] = results['p_value'] < ALPHA
 
     results.to_csv(OUTPUT_CSV, index=False)
-    print(f"\nSalvato → {OUTPUT_CSV}")
-    print(f"  Totale test     : {len(results)}")
-    print(f"  Significativi   : {results['significant'].sum()} (p < {ALPHA})")
+    print(f"\nSaved → {OUTPUT_CSV}")
+    print(f"  Total test     : {len(results)}")
+    print(f"  Significant   : {results['significant'].sum()} (p < {ALPHA})")
     print(results[results['significant']].head(10).to_string(index=False))
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ DATASETS = [
     'abundance_WT2D',
 ]
 
-PERTURBATION_TYPES = ['remove_features', 'sparsity', 'densification']
+PERTURBATION_TYPES =  ['remove_features', 'zero_inflation', 'zero_imputation']
 # PERTURBATION_TYPES =[]
 
 # Default completo — viene overridato da --models se passato da CLI
@@ -47,7 +47,7 @@ PRECOMPUTED_DIR = str(_DT_DIR / 'perturbed_datasets_final')
 '''
 To run the test:
 python test_perturbations.py --dataset abundance_cirrhosis--stagediscovery --pert remove_features
-python test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
+python test_perturbations.py --dataset abundance_obesity --pert zero_inflation --models rf,tabicl
 ...
     '''
 

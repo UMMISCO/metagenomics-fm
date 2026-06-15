@@ -20,7 +20,7 @@ data_transformations/
         test_perturbations.py         # Entry point for one (dataset, pert_type) job
         run_all.sh                    # Parallel launcher across 4 GPUs
         merge_tidy.py                 # Merge result parquets into flat CSVs
-        statistical_test.py           # DeLong test + FDR correction
+        statistical_test.py           # DeLong test 
 
     ablation_protected.csv            # Per-dataset n_features_protect (output of Step 0)
     perturbed_datasets_final/         # Output of Step 1
@@ -165,13 +165,17 @@ python data_transformations/benchmarking/test_perturbations.py --models original
 ### Run — single job
 **Options:**
 
---pert remove_features, sparsity, densification
+--pert remove_features, zero_inflation, zero_imputation
 
 --models rf, xgb, tabdpt, original_v2, tabicl, contextab
 
 ```bash
 python data_transformations/benchmarking/test_perturbations.py --dataset abundance_ibd --pert remove_features
 python data_transformations/benchmarking/test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
+```
+
+```bash on ALL 6 DATASETS (without --dataset)
+python data_transformations/benchmarking/test_perturbations.py  --pert remove_features
 ```
 
 ### Run — Full reproduction (HPC, multi-GPU)
@@ -181,7 +185,7 @@ bash data_transformations/benchmarking/run_all.sh
 ```
 
 Launches 36 parallel jobs (6 datasets × 3 perturbations × 2 environments)
-distributed across 4 GPUs in round-robin. Logs written to `logs_final/`.
+distributed across 4 GPUs and 2 different environments due to libraries conflicts. Logs written to `logs_final/`.
 
 Monitor progress:
 ```bash

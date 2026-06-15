@@ -324,17 +324,15 @@ class SparsityPerturbation(Perturbation):
         mod_nonzeros = (X[modifiable] > 0).sum().sum()
         mod_zeros = (X[modifiable] == 0).sum().sum()
 
-        # ===============================================================
         # CASE 0: No change
-        # ===============================================================
+
         if delta == 0:
             if verbose:
                 print("  Already at target sparsity.")
             return X
 
-        # ===============================================================
         # CASE 1: Need MORE zeros → ADD zeros → sparsify modifiable features
-        # ===============================================================
+
         if delta > 0:
             max_addable = mod_nonzeros
             if delta > max_addable:
@@ -344,42 +342,26 @@ class SparsityPerturbation(Perturbation):
 
             X = self._add_exact_zeros(X, delta, seed=seed, verbose=verbose)
 
-        # ===============================================================
         # CASE 2: Need FEWER zeros → REMOVE zeros → densify modifiable features
         # NOTE: This case should never occur in our benchmark since target_sparsity
         # is always > current_sparsity for SparsityPerturbation.
         # Densification is handled by DensificationPerturbation instead.
-        # ===============================================================
+
         else:
             if verbose:
                 print("  [WARN] target_sparsity < current_sparsity — use DensificationPerturbation instead. Returning X unchanged.")
             return X
 
-        # need_to_fill = -delta
-        # max_fillable = mod_zeros
-        # if need_to_fill > max_fillable:
-        #     if verbose:
-        #         print(f"  [WARN] Cannot fill {need_to_fill} zeros; clipping to {max_fillable}.")
-        #     need_to_fill = max_fillable
-        # X = self._fill_exact_zeros(
-        #     X, need_to_fill,
-        #     noise_range=noise_range,
-        #     seed=seed,
-        #     verbose=verbose,
-        # )
-
-        # ===============================================================
         # Final report
-        # ===============================================================
+
         final_sparsity = (X == 0).sum().sum() / X.size
         if verbose:
             print(f"  Final sparsity: {final_sparsity:.4f}")
 
         return X
 
-    # ------------------------------------------------------------------
     # ADD ZEROS by power transform (binary search)
-    # ------------------------------------------------------------------
+
     def _add_exact_zeros(
         self,
         X: pd.DataFrame,
@@ -436,9 +418,8 @@ class SparsityPerturbation(Perturbation):
 
         return self._renormalize(X_t, verbose)
 
-    # ------------------------------------------------------------------
     # FILL ZEROS with random noise
-    # ------------------------------------------------------------------
+
     def _fill_exact_zeros(
         self,
         X: pd.DataFrame,
@@ -476,13 +457,8 @@ class SparsityPerturbation(Perturbation):
 
         return self._renormalize(X, verbose)
 
-# =============================================================================
-# STATISTICS MODULE
-# =============================================================================
 
-# =============================================================================
-# DENSIFICATION PERTURBATION
-# =============================================================================
+# Zero Imputation PERTURBATION
 
 class DensificationPerturbation(Perturbation):
     """
@@ -521,11 +497,11 @@ class DensificationPerturbation(Perturbation):
         need_to_fill = current_zeros - target_zeros
 
         if verbose:
-            print(f"  Densification: sparsity {current_sparsity:.3f} → target {target_sparsity:.3f} (fill {need_to_fill} zeros)")
+            print(f"  Zero imputation: sparsity {current_sparsity:.3f} → target {target_sparsity:.3f} (fill {need_to_fill} zeros)")
 
         if need_to_fill <= 0:
             if verbose:
-                print("  target_sparsity >= current_sparsity — no densification needed.")
+                print("  target_sparsity >= current_sparsity — no zero imputation needed.")
             return X
 
         # Positions of zeros in modifiable features
@@ -538,16 +514,6 @@ class DensificationPerturbation(Perturbation):
                 print(f"  [WARN] Only {len(zero_positions)} zeros available; clipping to that.")
             need_to_fill = len(zero_positions)
 
-        # OLD APPROACH (global pool — sampling from all non-zero values across all features):
-        # nonzero_vals = X[modifiable].values.flatten()
-        # nonzero_vals = nonzero_vals[nonzero_vals > 0]
-        # chosen_pos = rng.choice(len(zero_positions), size=need_to_fill, replace=False)
-        # fill_values = rng.choice(nonzero_vals, size=need_to_fill, replace=True)
-        # for idx, pos_idx in enumerate(chosen_pos):
-        #     row_i, col_i = zero_positions[pos_idx]
-        #     col_name = mod_cols[col_i]
-        #     X.at[X.index[row_i], col_name] = fill_values[idx]
-
         # Beginning NEW APPROACH — per-feature distribution:
         # For each modifiable feature, collect its non-zero values
         feature_nonzero = {}
@@ -556,7 +522,6 @@ class DensificationPerturbation(Perturbation):
             nz = vals[vals > 0]
             if len(nz) > 0:
                 feature_nonzero[col] = nz
-
         ##### End new approach
 
         if len(feature_nonzero) == 0:

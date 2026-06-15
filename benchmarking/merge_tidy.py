@@ -71,7 +71,7 @@ def dedup(df: pd.DataFrame, keys: list) -> pd.DataFrame:
     df = df.drop_duplicates(subset=keys)
     after = len(df)
     if before != after:
-        print(f"  [INFO] Removed {before - after} Doubled")
+        print(f"  [INFO] Removed {before - after} Duplicated")
     return df
 
 # =============================================================================
@@ -95,7 +95,7 @@ def main():
         metrics = remap_models(metrics)
         metrics = dedup(metrics, keys=['dataset', 'model', 'perturbation', 'param_value', 'fold'])
         metrics.to_csv(args.metrics_out, index=False)
-        print(f"\nSaved → {args.metrics_out}  ({len(metrics)} roxs)")
+        print(f"\nSaved → {args.metrics_out}  ({len(metrics)} rows)")
         print(f"  Models  : {sorted(metrics['model'].unique())}")
         print(f"  Dataset  : {sorted(metrics['dataset'].unique())}")
         print(f"  Unique fold: {sorted(metrics['fold'].unique())}")
@@ -104,7 +104,7 @@ def main():
 
     # --- PREDICTIONS ---
     print(f"\n{'='*60}")
-    print(f"Upload predictions from: {args.results_dir}")
+    print(f"Loading predictions from: {args.results_dir}")
     print(f"{'='*60}")
     predictions = load_parquets(args.results_dir, kind='predictions')
 

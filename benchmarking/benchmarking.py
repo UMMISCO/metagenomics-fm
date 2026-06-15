@@ -80,7 +80,7 @@ def _param_label(params: dict) -> Tuple[str, str]:
 def _params_to_filename(pert_type: str, params: dict) -> str:
     if pert_type == 'remove_features':
         return f"k={params['k']}.parquet"
-    elif pert_type in ('sparsity', 'densification'):
+    elif pert_type in ('zero_inflation', 'zero_imputation'):
         return f"{params['target_sparsity']}.parquet"
     return "params.parquet"
 
@@ -90,10 +90,10 @@ def _adaptive_params(pert_type: str, n_features: int, actual_sparsity: float, se
         k_max = max(1, n_features // 2)
         k_values = [int(k) for k in np.linspace(1, k_max, 10)]
         return [{'k': k, 'selection_method': 'highest_abundance', 'seed': seed} for k in k_values]
-    elif pert_type == 'sparsity':
+    elif pert_type == 'zero_inflation':
         sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.99, 7)[1:-1]]
         return [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
-    elif pert_type == 'densification':
+    elif pert_type == 'zero_imputation':
         sparsity_values = [round(s, 3) for s in np.linspace(actual_sparsity, 0.01, 7)[1:-1]]
         return [{'target_sparsity': s, 'seed': seed} for s in sparsity_values]
     return []
@@ -290,12 +290,12 @@ class Benchmarker:
         baseline_only: bool = False,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """
-        OOD benchmark per una singola combinazione (dataset, perturbation_type).
+        OOD benchmark for a single (dataset, perturbation_type) combination.
 
-        Ritorna:
-          results_df   — metriche aggregate (come prima)
-          oof_df       — predizioni OOF per sample
-                         colonne: dataset, model, perturbation, param_value,
+        Returns:
+          results_df   — aggregated metrics (as before)
+          oof_df       — per-sample OOF predictions
+                         columns: dataset, model, perturbation, param_value,
                                   split, sample_idx, y_true, y_pred, proba_class*
         """
         if model_names is None:
@@ -337,8 +337,8 @@ class Benchmarker:
         else:
             X_original = gen.X_original
 
-        metrics_rows = []  # lista di DataFrame long (uno per model×param)
-        pred_rows    = []  # predizioni per fold
+        metrics_rows = []
+        pred_rows    = []
 
         for model_name in model_names:
             print(f"\n  Model: {model_name}")
@@ -378,7 +378,7 @@ class Benchmarker:
                 )
                 pred_rows.append(preds_ood)
 
-                # merge baseline e ood per fold → una riga per fold
+                # merge baseline e ood per fold → one row per fold
                 merged = baseline_df.rename(columns={
                     'auroc': 'baseline_auroc', 'f1': 'baseline_f1',
                     'prec':  'baseline_prec',  'rec': 'baseline_rec',
@@ -393,7 +393,7 @@ class Benchmarker:
         results_df     = pd.concat(metrics_rows, ignore_index=True)
         predictions_df = pd.concat(pred_rows, ignore_index=True)
 
-        # riordina colonne
+        # order columns
         if baseline_only:
             results_df = results_df[['dataset', 'model', 'fold', 'auroc', 'f1', 'prec', 'rec']]
         else:
@@ -478,7 +478,7 @@ class Benchmarker:
                            bbox_to_anchor=(0, -0.3), loc='upper left', ncol=2)
             fig.suptitle(
                 f"{pert_type}  —  OOD: train=original | test=perturbed\n"
-                f"(tratteggiato = baseline: train=original | test=original)",
+                f"(dashed = baseline: train=original | test=original)",
                 fontsize=11, fontweight='bold',
             )
             plt.tight_layout()
