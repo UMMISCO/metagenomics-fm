@@ -9,9 +9,6 @@ Merges all parquet files produced by benchmarking.py into two big CSVs:
   - predictions_all.csv : one row per (dataset, model, perturbation, param_value, fold, sample_idx)
 """
 
-# =============================================================================
-# CONFIG
-# =============================================================================
 import pathlib as _pl
 RESULTS_DIR = str(_pl.Path(__file__).resolve().parents[1] / 'benchmark_results_new_final')
 METRICS_OUT     = "metrics_all_final.csv"
@@ -26,14 +23,10 @@ MODEL_DISPLAY = {
     "contextab":   "ContextTab",
 }
 
-# =============================================================================
-# HELPERS
-# =============================================================================
-
 def load_parquets(results_dir: str, kind: str) -> pd.DataFrame:
     """
-    kind = 'metrics'     → carica tutti i {pert_type}__{env}.parquet
-    kind = 'predictions' → carica tutti i {pert_type}__predictions__{env}.parquet
+    kind = 'metrics'     → loads all {pert_type}__{env}.parquet
+    kind = 'predictions' → loads all {pert_type}__predictions__{env}.parquet
     """
     if kind == 'metrics':
         pattern = os.path.join(results_dir, "**", "*.parquet")
@@ -44,7 +37,7 @@ def load_parquets(results_dir: str, kind: str) -> pd.DataFrame:
         files   = sorted(glob.glob(pattern, recursive=True))
 
     if not files:
-        print(f"[ERROR] Nessun file trovato per kind='{kind}' in: {results_dir}")
+        print(f"[ERROR] No file found for kind='{kind}' in: {results_dir}")
         return pd.DataFrame()
 
     dfs = []
@@ -53,10 +46,10 @@ def load_parquets(results_dir: str, kind: str) -> pd.DataFrame:
         try:
             df = pd.read_parquet(fpath)
             if df.empty:
-                print(f"  [SKIP] {fname} — vuoto")
+                print(f"  [SKIP] {fname} — empty")
                 continue
             dfs.append(df)
-            print(f"  [OK]   {fname:<70}  {len(df):>6} righe")
+            print(f"  [OK]   {fname:<70}  {len(df):>6} rows")
         except Exception as e:
             print(f"  [ERROR] {fname}: {e}")
 
@@ -78,7 +71,7 @@ def dedup(df: pd.DataFrame, keys: list) -> pd.DataFrame:
     df = df.drop_duplicates(subset=keys)
     after = len(df)
     if before != after:
-        print(f"  [INFO] Rimossi {before - after} duplicati")
+        print(f"  [INFO] Removed {before - after} Doubled")
     return df
 
 # =============================================================================
@@ -94,7 +87,7 @@ def main():
 
     # --- METRICS ---
     print(f"\n{'='*60}")
-    print(f"Caricamento metriche da: {args.results_dir}")
+    print(f"Load metrics from: {args.results_dir}")
     print(f"{'='*60}")
     metrics = load_parquets(args.results_dir, kind='metrics')
 
@@ -102,16 +95,16 @@ def main():
         metrics = remap_models(metrics)
         metrics = dedup(metrics, keys=['dataset', 'model', 'perturbation', 'param_value', 'fold'])
         metrics.to_csv(args.metrics_out, index=False)
-        print(f"\nSalvato → {args.metrics_out}  ({len(metrics)} righe)")
-        print(f"  Modelli  : {sorted(metrics['model'].unique())}")
+        print(f"\nSaved → {args.metrics_out}  ({len(metrics)} roxs)")
+        print(f"  Models  : {sorted(metrics['model'].unique())}")
         print(f"  Dataset  : {sorted(metrics['dataset'].unique())}")
-        print(f"  Fold unici: {sorted(metrics['fold'].unique())}")
+        print(f"  Unique fold: {sorted(metrics['fold'].unique())}")
     else:
-        print("[ERROR] Nessuna metrica trovata.")
+        print("[ERROR] No metric found.")
 
     # --- PREDICTIONS ---
     print(f"\n{'='*60}")
-    print(f"Caricamento predizioni da: {args.results_dir}")
+    print(f"Upload predictions from: {args.results_dir}")
     print(f"{'='*60}")
     predictions = load_parquets(args.results_dir, kind='predictions')
 
@@ -119,11 +112,11 @@ def main():
         predictions = remap_models(predictions)
         predictions = dedup(predictions, keys=['dataset', 'model', 'perturbation', 'param_value', 'fold', 'sample_idx'])
         predictions.to_csv(args.predictions_out, index=False)
-        print(f"\nSalvato → {args.predictions_out}  ({len(predictions)} righe)")
-        print(f"  Modelli  : {sorted(predictions['model'].unique())}")
+        print(f"\nSaved → {args.predictions_out}  ({len(predictions)} rows)")
+        print(f"  Models  : {sorted(predictions['model'].unique())}")
         print(f"  Split    : {sorted(predictions['split'].unique())}")
     else:
-        print("[ERROR] Nessuna predizione trovata.")
+        print("[ERROR] No prediction found.")
 
 
 if __name__ == "__main__":
