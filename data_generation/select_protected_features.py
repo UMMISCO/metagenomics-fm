@@ -91,7 +91,7 @@ def run() -> pd.DataFrame:
         print(f"  {dataset}")
         print(f"{'=' * 52}")
 
-        gen = DataGenerator(generator_type='densification', data_source='pasolli')
+        gen = DataGenerator(generator_type='zero_imputation', data_source='pasolli')
         gen.load_data(dataset)
         X = gen.X_original.values
         y = gen.y_original.values
