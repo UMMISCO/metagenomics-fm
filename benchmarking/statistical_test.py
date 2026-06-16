@@ -20,9 +20,9 @@ OUTPUT_CSV      = "results/statistical_results_final.csv"
 ALPHA           = 0.05
 
 def main():
-    print(f"Caricamento {PREDICTIONS_CSV}...")
+    print(f"Loading {PREDICTIONS_CSV}...")
     df = pd.read_csv(PREDICTIONS_CSV)
-    print(f"  {len(df)} righe, colonne: {df.columns.tolist()}")
+    print(f"  {len(df)} rows, columns: {df.columns.tolist()}")
 
     df_base = df[df['split'] == 'baseline']
     df_ood  = df[df['split'] == 'ood']
@@ -81,9 +81,6 @@ def main():
         })
 
     results = pd.DataFrame(rows)
-
-    valid_mask = ~results['p_value'].isna()
-    pvals = results.loc[valid_mask, 'p_value'].values
     results['significant'] = results['p_value'] < ALPHA
 
     results.to_csv(OUTPUT_CSV, index=False)
