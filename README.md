@@ -1,5 +1,12 @@
 # Microbiome Perturbation Analysis
 
+> 📄 **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
+
+**Author:** Giulia Perciballi 
+**Advisor** Ahmad Fall, Edi PRifti and Jean-Daniel Zucker
+**Date:** June 2026
+**Affiliation:** UMMISCO
+
 Pipeline for evaluating TFM robustness on microbiome compositional data
 under controlled perturbations.
 
