@@ -1,0 +1,70 @@
+[project]
+name = "metagnomics-tfm-review-ecml-pkdd-2026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "annotated-doc==0.0.4",
+    "antlr4-python3-runtime==4.9.3",
+    "anyio==4.14.0",
+    "backoff==2.2.1",
+    "cloudpickle==3.1.2",
+    "einops==0.8.2",
+    "faiss-cpu==1.12.0",
+    "fastparquet==2026.5.0",
+    "huggingface-hub==1.19.0",
+    "jinja2==3.1.6",
+    "lightgbm==4.6.0",
+    "matplotlib==3.11.0",
+    "mlstatkit==0.1.91",
+    "numba==0.65.1",
+    "numpy==2.4.4",
+    "omegaconf==2.3.1",
+    "pandas==3.0.1",
+    "pillow==12.2.0",
+    "psutil==7.2.2",
+    "pyarrow==23.0.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.1",
+    "python-dotenv==1.2.2",
+    "pyyaml==6.0.3",
+    "requests==2.34.2",
+    "rich==15.0.0",
+    "safetensors==0.8.0",
+    "sap-rpt-oss",
+    "scikit-learn==1.7.2",
+    "scipy==1.17.1",
+    "seaborn==0.13.2",
+    "shap==0.51.0",
+    "sympy==1.14.0",
+    "tabdpt==1.1.12",
+    "tabicl==2.0.1",
+    "tabpfn==6.3.2",
+    "tabpfn-common-utils==0.2.21",
+    "tokenizers==0.22.2",
+    "torch==2.11.0+cu129",
+    "torcheval==0.0.7",
+    "torchvision==0.26.0+cu129",
+    "tqdm==4.68.3",
+    "transformers==5.12.1",
+    "triton==3.6.0",
+    "typer==0.25.1",
+    "typing-extensions==4.15.0",
+    "xgboost==3.2.0",
+]
+
+[tool.uv]
+environments = [
+  "sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu129" }
+torchvision = { index = "pytorch-cu129" }
+sap-rpt-oss = { git = "https://github.com/SAP-samples/sap-rpt-1-oss", rev = "a0067b3c9db56bc35a6dcab09a9223a3ff0821e0" }
+
+[[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
