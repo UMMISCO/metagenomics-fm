@@ -1,6 +1,6 @@
 # Microbiome Perturbation Analysis
 
-> 📄 **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
+> **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
 
 **Author:** Giulia Perciballi 
 **Advisor** Ahmad Fall, Edi PRifti and Jean-Daniel Zucker
