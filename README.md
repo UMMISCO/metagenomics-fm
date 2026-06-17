@@ -8,23 +8,22 @@ under controlled perturbations.
 ## Repository Structure
 
 ```
-data_transformations/
-    data_generation/
-        select_protected_features.py  # Step 0 — select protected features per dataset
-        generate_perturbed_datasets.py  # Step 1 — pre-compute all perturbed parquets
-        data_generator.py             # DataGenerator — load, perturb, visualize
-        perturbation_core.py          # Perturbation classes + PerturbationStats
+data_generation/
+    select_protected_features.py  # Step 0 — select protected features per dataset
+    generate_perturbed_datasets.py  # Step 1 — pre-compute all perturbed parquets
+    data_generator.py             # DataGenerator — load, perturb, visualize
+    perturbation_core.py          # Perturbation classes + PerturbationStats
 
-    benchmarking/
-        benchmarking.py               # Benchmarker — OOD cross-validation
-        test_perturbations.py         # Entry point for one (dataset, pert_type) job
-        run_all.sh                    # Parallel launcher across 4 GPUs
-        merge_tidy.py                 # Merge result parquets into flat CSVs
-        statistical_test.py           # DeLong test 
+benchmarking/
+    benchmarking.py               # Benchmarker — OOD cross-validation
+    test_perturbations.py         # Entry point for one (dataset, pert_type) job
+    run_all.sh                    # Parallel launcher across 4 GPUs
+    merge_tidy.py                 # Merge result parquets into flat CSVs
+    statistical_test.py           # DeLong test 
 
-    ablation_protected.csv            # Per-dataset n_features_protect (output of Step 0)
-    perturbed_datasets_final/         # Output of Step 1
-    benchmark_results_new_final/      # Output of benchmarking
+ablation_protected.csv            # Per-dataset n_features_protect (output of Step 0)
+perturbed_datasets_final/         # Output of Step 1
+benchmark_results_new_final/      # Output of benchmarking
 ```
 
 ---
@@ -57,7 +56,7 @@ until AUROC drops by >= 3%. Saves results to `ablation_protected.csv`.
 **Must be run before Step 1.**
 
 ```bash
-python data_transformations/data_generation/select_protected_features.py
+python data_generation/select_protected_features.py
 ```
 
 ---
@@ -120,7 +119,7 @@ Each parquet contains all feature columns + a `label` column.
 ### Run
 
 ```bash
-python data_transformations/data_generation/generate_perturbed_datasets.py
+python data_generation/generate_perturbed_datasets.py
 ```
 
 Already-existing files are skipped.
@@ -159,7 +158,7 @@ Benchmark      : TRAIN original  | TEST perturbed  → measures robustness to pe
 
 ### Run - Baseline (No perturbations)
 ```bash
-python data_transformations/benchmarking/test_perturbations.py --models original_v2,tabicl --baseline_only
+python benchmarking/test_perturbations.py --models original_v2,tabicl --baseline_only
 ```
 
 ### Run — single job
@@ -170,18 +169,18 @@ python data_transformations/benchmarking/test_perturbations.py --models original
 --models rf, xgb, tabdpt, original_v2, tabicl, contextab
 
 ```bash
-python data_transformations/benchmarking/test_perturbations.py --dataset abundance_ibd --pert remove_features
-python data_transformations/benchmarking/test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
+python benchmarking/test_perturbations.py --dataset abundance_ibd --pert remove_features
+python benchmarking/test_perturbations.py --dataset abundance_obesity --pert sparsity --models rf,tabicl
 ```
 
 ```bash on ALL 6 DATASETS (without --dataset)
-python data_transformations/benchmarking/test_perturbations.py  --pert remove_features
+python benchmarking/test_perturbations.py  --pert remove_features
 ```
 
 ### Run — Full reproduction (HPC, multi-GPU)
 
 ```bash
-bash data_transformations/benchmarking/run_all.sh
+bash benchmarking/run_all.sh
 ```
 
 Launches 36 parallel jobs (6 datasets × 3 perturbations × 2 environments)
@@ -209,7 +208,7 @@ benchmark_results_new_final/
 ### Merge results
 
 ```bash
-python data_transformations/benchmarking/merge_tidy.py
+python benchmarking/merge_tidy.py
 ```
 
 Scans all parquets under `benchmark_results_new_final/`, deduplicates,
@@ -232,7 +231,7 @@ MODEL_DISPLAY = {
 ### Statistical testing
 
 ```bash
-python data_transformations/benchmarking/statistical_test.py
+python benchmarking/statistical_test.py
 ```
 
 Performs paired DeLong tests comparing baseline AUROC vs OOD AUROC for every
