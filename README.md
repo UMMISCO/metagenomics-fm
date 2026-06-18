@@ -35,6 +35,17 @@ benchmark_results_new_final/      # Output of benchmarking
 
 ---
 
+## Installation
+```python
+git clone https://github.com/UMMISCO/metagenomics-fm/
+cd metagenomics-fm
+pip install uv
+uv venv --python 3.12.2
+source .venv/bin/activate
+uv sync
+```
+---
+
 ## Datasets
 
 Six binary classification datasets from the Pasolli et al. gut microbiome collection.
