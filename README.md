@@ -301,3 +301,7 @@ MLstatkit       # DeLong test
 ## Reproducibility
 
 All scripts use seed 42.
+
+## Funding
+
+ANR DeepIntegrOmics (ANR-21-CF45-0030)
