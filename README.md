@@ -2,8 +2,8 @@
 
 > **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
 
-**Author:** Giulia Perciballi\
-**Advisor:** Ahmad Fall, Edi Prifti and Jean-Daniel Zucker\
+**Author of the code:** Giulia Perciballi\
+**Authors of the paper:** Giulia Perciballi, Ahmad Fall, Federica Granese, Edi Prifti and Jean-Daniel Zucker\
 **Date:** June 2026\
 **Affiliation:** UMMISCO
 
