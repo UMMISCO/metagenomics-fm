@@ -27,6 +27,9 @@ benchmarking/
     merge_tidy.py                 # Merge result parquets into flat CSVs
     statistical_test.py           # DeLong test 
 
+analyses/
+    1_make_plots.Rmd              # R Markdown — figures and plots from results
+
 ablation_protected.csv            # Per-dataset n_features_protect (output of Step 0)
 perturbed_datasets_final/         # Output of Step 1
 benchmark_results_new_final/      # Output of benchmarking

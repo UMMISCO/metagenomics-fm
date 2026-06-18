@@ -1,0 +1,1295 @@
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(purrr)
+library(tibble)
+library(stats)
+library(ggtext)
+library(patchwork)
+library(purrr)
+library(scales)
+library(RColorBrewer)
+library(randomcoloR)
+library(ragg)
+library(ggalluvial)
+library(ggrepel)
+library(corrplot)
+
+base_path <- "/Users/ahmad/Home/IRD/Lab/DeepIntegromics/2026_metagenomics_tfm_review_ecml_pkdd"
+plots_path <- file.path(base_path, "plots")
+metrics_csv_path <- file.path(base_path, "data/results", "metrics_all_final.csv")
+predictions_csv_path <- file.path(base_path, "data/results", "predictions_all_final.csv")
+stats_csv_path <- file.path(base_path, "data/stats_results", "statistical_results_final.csv")
+
+
+metrics_df <- read_csv(metrics_csv_path)
+df <- read_csv(predictions_csv_path)
+stats_df <- read_csv(stats_csv_path)
+
+dataset_labels <- c(
+  "abundance_cirrhosis--stagediscovery" = "Cirrhosis 1",
+  "abundance_cirrhosis--stagevalidation" = "Cirrhosis 2",
+  "abundance_ibd" = "Inflammatory Bowel Disease (IBD)",
+  "abundance_obesity" = "Obesity",
+  "abundance_t2d" = "Type 2 Diabetes (T2D)",
+  "abundance_WT2D" = "Women Type 2 Diabetes (WT2D)"
+)
+
+perturbation_labels <- c(
+  "remove_features" = "Feature Removal",
+  "sparsity" = "Zero Inflation",
+  "densification" = "Zero Imputation"
+)
+
+df <- df %>%
+  mutate(dataset = recode(dataset, !!!dataset_labels),
+         perturbation = recode(perturbation, !!!perturbation_labels))
+metrics_df <- metrics_df %>%
+  mutate(dataset = recode(dataset, !!!dataset_labels),
+         perturbation = recode(perturbation, !!!perturbation_labels))
+stats_df <- stats_df %>%
+  mutate(dataset = recode(dataset, !!!dataset_labels),
+         perturbation = recode(perturbation, !!!perturbation_labels))
+```
+
+```{r baseline-prediction-boxplots, fig.width=12, fig.height=6}
+df_baseline <- df %>%
+  filter(param_value == "baseline") %>%
+  mutate(y_true = factor(y_true, levels = c(0, 1), labels = c("Class 0", "Class 1")))
+
+# ggplot(df_baseline, aes(x = model, y = proba_class1, fill = y_true)) +
+#   geom_boxplot(outlier.shape = NA, alpha = 0.8) +
+#   geom_point(aes(group = interaction(y_true, sample_idx)),
+#              position = position_dodge(width = 0.75),
+#              size = 0.8, alpha = 0.4) +
+#   geom_line(aes(group = interaction(y_true, sample_idx)),
+#             position = position_dodge(width = 0.75),
+#             alpha = 0.2, linewidth = 0.3) +
+#   facet_wrap(~ dataset, scales = "free_y") +
+#   scale_fill_brewer(palette = "Set2", name = "True class") +
+#   labs(
+#     x = "Model",
+#     y = "P(class 1)",
+#     title = "Baseline predictions by model"
+#   ) +
+#   theme_bw(base_size = 13) +
+#   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r metric-helpers}
+compute_f1 <- function(y_true, proba_class1) {
+  y_pred <- ifelse(proba_class1 >= 0.5, 1, 0)
+  tp <- sum(y_pred == 1 & y_true == 1)
+  fp <- sum(y_pred == 1 & y_true == 0)
+  fn <- sum(y_pred == 0 & y_true == 1)
+  prec <- tp / max(tp + fp, 1)
+  rec <- tp / max(tp + fn, 1)
+  ifelse(prec + rec == 0, 0, 2 * prec * rec / (prec + rec))
+}
+
+compute_auroc <- function(y_true, proba_class1) {
+  n_pos <- sum(y_true == 1)
+  n_neg <- sum(y_true == 0)
+  if (n_pos == 0 || n_neg == 0) return(NA_real_)
+  ord <- order(proba_class1, decreasing = TRUE)
+  y_sorted <- y_true[ord]
+  tp <- cumsum(y_sorted == 1)
+  fp <- cumsum(y_sorted == 0)
+  tpr <- tp / n_pos
+  fpr <- fp / n_neg
+  tpr <- c(0, tpr)
+  fpr <- c(0, fpr)
+  sum(diff(fpr) * (tpr[-1] + tpr[-length(tpr)]) / 2)
+}
+
+compute_auprc <- function(y_true, proba_class1) {
+  n_pos <- sum(y_true == 1)
+  if (n_pos == 0 || n_pos == length(y_true)) return(NA_real_)
+  ord <- order(proba_class1, decreasing = TRUE)
+  y_sorted <- y_true[ord]
+  tp <- cumsum(y_sorted == 1)
+  fp <- cumsum(y_sorted == 0)
+  prec <- tp / (tp + fp)
+  rec <- tp / n_pos
+  rec <- c(0, rec)
+  prec <- c(1, prec)
+  sum(diff(rec) * (prec[-1] + prec[-length(prec)]) / 2)
+}
+
+metrics_list <- list(
+  list(name = "F1",    fn = compute_f1,    unit = "pp"),
+  list(name = "AUROC", fn = compute_auroc, unit = "pp"),
+  list(name = "AUPRC", fn = compute_auprc, unit = "pp")
+)
+```
+
+```{r delta-per-perturbation, fig.width=10, fig.height=8}
+perturbations <- df %>%
+  filter(perturbation != "baseline", !is.na(perturbation)) %>%
+  pull(perturbation) %>%
+  unique()
+
+for (metric in metrics_list) {
+
+  # Baseline metric per model × dataset × fold
+  metric_baseline <- df %>%
+    filter(param_value == "baseline") %>%
+    distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+    group_by(dataset, model, fold) %>%
+    summarise(val_baseline = metric$fn(y_true, proba_class1), .groups = "drop")
+
+  for (selected_perturbation in perturbations) {
+
+    # Perturbed metric per model × dataset × param_value × fold
+    metric_pert <- df %>%
+      filter(perturbation == selected_perturbation) %>%
+      mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+"))) %>%
+      filter(!is.na(param_numeric)) %>%
+      group_by(dataset, model, param_value = param_numeric, fold) %>%
+      summarise(val_pert = metric$fn(y_true, proba_class1), .groups = "drop")
+
+    # Delta = perturbed - baseline (pp), then summarise
+    df_delta <- metric_pert %>%
+      left_join(metric_baseline, by = c("dataset", "model", "fold")) %>%
+      filter(!is.na(val_baseline), !is.na(val_pert)) %>%
+      mutate(delta = (val_pert - val_baseline) * 100) %>%
+      group_by(dataset, model, param_value) %>%
+      summarise(
+        delta_mean = mean(delta, na.rm = TRUE),
+        delta_se = sd(delta, na.rm = TRUE) / sqrt(sum(!is.na(delta))),
+        .groups = "drop"
+      )
+
+    # Add zero-point (no perturbation) so lines start at origin
+    df_zero <- df_delta %>%
+      distinct(dataset, model) %>%
+      mutate(param_value = 0, delta_mean = 0, delta_se = 0)
+    df_delta <- bind_rows(df_zero, df_delta)
+
+    # Convert param_value to ordered factor for evenly spaced x-axis
+    param_levels <- sort(unique(df_delta$param_value))
+    df_delta <- df_delta %>%
+      mutate(param_value = factor(param_value, levels = param_levels))
+
+    p <- ggplot(df_delta, aes(x = param_value, y = delta_mean, color = model, group = model)) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+      geom_line(linewidth = 0.8) +
+      geom_errorbar(aes(ymin = delta_mean - delta_se, ymax = delta_mean + delta_se),
+                    width = 0.2, linewidth = 0.4,
+                    position = position_dodge(width = 0.15)) +
+      geom_point(size = 1.5, position = position_dodge(width = 0.15)) +
+      facet_wrap(~ dataset, scales = "free_x") +
+      scale_y_continuous(breaks = seq(-100, 100, by = 10),
+                         labels = function(x) paste0(x, " ", metric$unit)) +
+      scale_color_brewer(palette = "Dark2", name = "Model") +
+      labs(
+        x = "Parameter value",
+        y = bquote(Delta*.(metric$name) ~ "(pp, perturbed - baseline, mean" %+-% "SE across folds)"),
+        title = paste0(metric$name, " degradation from baseline (", selected_perturbation, ")")
+      ) +
+      theme_bw(base_size = 13) +
+      theme(legend.position = "bottom",
+            legend.direction = "horizontal",
+            plot.margin = unit(c(0, 0, 0, 0), "cm"),
+            legend.text = element_text(size=12),
+            legend.title = element_text(size=14),
+            legend.margin = margin(0, 0, 0, 0),
+            legend.box.margin = margin(0, 0, 0, 0),
+            legend.spacing = unit(0, "pt"),
+            axis.text.x = element_text(margin = margin(0, 0, 0, 0), angle = 45, hjust = 1),
+            axis.text.y = element_text(margin = margin(0, 0, 0, 0))) +
+      guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE))
+
+    ggsave(file.path(plots_path, paste0("delta_", tolower(metric$name), "_", selected_perturbation, ".pdf")),
+           plot = p, width = 10, height = 8)
+  }
+}
+```
+
+```{r calibration-curves, fig.width=12, fig.height=8}
+# Deduplicate baseline (appears once per perturbation)
+df_cal <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE)
+
+# Bin predictions and compute observed frequency
+df_cal_binned <- df_cal %>%
+  mutate(bin = cut(proba_class1, breaks = seq(0, 1, by = 0.1),
+                   include.lowest = TRUE, right = FALSE)) %>%
+  group_by(dataset, model, bin) %>%
+  summarise(
+    observed = mean(y_true),
+    predicted = mean(proba_class1),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  filter(!is.na(bin))
+
+p_cal <- ggplot(df_cal_binned, aes(x = predicted, y = observed, color = model)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") +
+  #geom_line(linewidth = 0.8) +
+  geom_point(aes(size = n)) +
+  facet_wrap(~ dataset) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_size_continuous(name = "N samples", range = c(1, 5)) +
+  coord_equal(xlim = c(0, 1), ylim = c(0, 1)) +
+  labs(
+    x = "Mean predicted probability",
+    y = "Observed frequency (class 1)",
+    title = "Calibration curves (baseline predictions)"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom")
+
+ggsave(file.path(plots_path, "calibration_curves.pdf"),
+       plot = p_cal, width = 12, height = 8)
+```
+
+```{r ranking-stability, fig.width=12, fig.height=8}
+# Use metrics_all.csv: compute mean AUROC per model × dataset × perturbation × param_value
+# Include baseline level (from baseline_auroc column)
+for (selected_perturbation in unique(metrics_df$perturbation)) {
+
+  # Baseline ranks (one row per model × dataset, averaged over folds)
+  df_bl_rank <- metrics_df %>%
+    filter(perturbation == selected_perturbation) %>%
+    group_by(dataset, model) %>%
+    summarise(mean_auroc = mean(baseline_auroc, na.rm = TRUE), .groups = "drop") %>%
+    mutate(param_value = "baseline")
+
+  # Perturbed ranks per param_value
+  df_pert_rank <- metrics_df %>%
+    filter(perturbation == selected_perturbation) %>%
+    group_by(dataset, model, param_value) %>%
+    summarise(mean_auroc = mean(auroc, na.rm = TRUE), .groups = "drop")
+
+  # Combine and rank
+  df_ranks <- bind_rows(df_bl_rank, df_pert_rank) %>%
+    group_by(dataset, param_value) %>%
+    mutate(rank = rank(-mean_auroc, ties.method = "average")) %>%
+    ungroup()
+
+  # Order param_value: baseline first, then sorted numerically
+  param_levels <- df_ranks %>%
+    distinct(param_value) %>%
+    mutate(num = as.numeric(str_extract(param_value, "[\\d.]+"))) %>%
+    arrange(is.na(num), num) %>%
+    pull(param_value)
+  df_ranks <- df_ranks %>%
+    mutate(param_value = factor(param_value, levels = param_levels))
+
+  p_rank <- ggplot(df_ranks, aes(x = param_value, y = rank, color = model, group = model)) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 2) +
+    scale_y_reverse(breaks = 1:6) +
+    facet_wrap(~ dataset) +
+    scale_color_brewer(palette = "Dark2", name = "Model") +
+    labs(
+      x = "Perturbation level",
+      y = "AUROC rank (1 = best)",
+      title = paste0("Model ranking stability (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 45, hjust = 1))
+
+  ggsave(file.path(plots_path, paste0("ranking_stability_", selected_perturbation, ".pdf")),
+         plot = p_rank, width = 12, height = 8)
+}
+```
+
+```{r sample-prediction-shift, fig.width=12, fig.height=6}
+for (selected_perturbation in perturbations) {
+
+  # Baseline probabilities per sample (deduplicated)
+  df_bl_proba <- df %>%
+    filter(param_value == "baseline") %>%
+    distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+    select(dataset, model, fold, sample_idx, proba_bl = proba_class1)
+
+  # Perturbed probabilities
+  df_pert_proba <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+"))) %>%
+    filter(!is.na(param_numeric))
+
+  # Mean absolute shift per model × dataset × param_value (averaged over samples and folds)
+  df_shift <- df_pert_proba %>%
+    left_join(df_bl_proba, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    mutate(abs_delta = abs(proba_class1 - proba_bl)) %>%
+    group_by(dataset, model, param_numeric) %>%
+    summarise(mean_abs_shift = mean(abs_delta, na.rm = TRUE), .groups = "drop")
+
+  p_shift <- ggplot(df_shift,
+                    aes(x = factor(round(param_numeric, 3)),
+                        y = model,
+                        fill = mean_abs_shift)) +
+    geom_tile(color = "white") +
+    facet_wrap(~ dataset, scales = "free_x") +
+    scale_fill_viridis_c(name = "Mean |shift|", option = "inferno", direction = -1) +
+    labs(
+      x = "Perturbation level",
+      y = "Model",
+      title = paste0("Mean absolute prediction shift (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "bottom")
+
+  ggsave(file.path(plots_path, paste0("prediction_shift_", selected_perturbation, ".pdf")),
+         plot = p_shift, width = 12, height = 6)
+}
+```
+
+```{r robustness-vs-baseline, fig.width=10, fig.height=7}
+# Mean baseline AUROC and mean delta AUROC per model × dataset (across all perturbations and folds)
+df_robust <- metrics_df %>%
+  mutate(delta_auroc = auroc - baseline_auroc) %>%
+  group_by(dataset, model) %>%
+  summarise(
+    baseline_auroc_mean = mean(baseline_auroc, na.rm = TRUE),
+    delta_auroc_mean = mean(delta_auroc, na.rm = TRUE) * 100,
+    .groups = "drop"
+  )
+
+p_robust <- ggplot(df_robust, aes(x = baseline_auroc_mean, y = delta_auroc_mean,
+                                   color = model, shape = dataset)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_point(size = 3.5) +
+  geom_text_repel(aes(label = paste0(model, "\n", dataset)),
+                  size = 2.5, max.overlaps = 20, segment.alpha = 0.4) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_shape_manual(values = c(16, 17, 15, 3, 7, 8), name = "Dataset") +
+  labs(
+    x = "Baseline AUROC (mean across folds)",
+    y = "Mean AUROC change (pp, across all perturbations)",
+    title = "Robustness vs. baseline performance"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom")
+
+ggsave(file.path(plots_path, "robustness_vs_baseline.pdf"),
+       plot = p_robust, width = 12, height = 10)
+```
+
+```{r robustness-vs-baseline-per-perturbation, fig.width=18, fig.height=10}
+# Same as robustness_vs_baseline but faceted by perturbation
+df_robust_pert <- metrics_df %>%
+  mutate(delta_auroc = (auroc - baseline_auroc) * 100) %>%
+  group_by(dataset, model, perturbation) %>%
+  summarise(
+    baseline_auroc_mean = mean(baseline_auroc, na.rm = TRUE),
+    baseline_auroc_se = sd(baseline_auroc, na.rm = TRUE) / sqrt(sum(!is.na(baseline_auroc))),
+    delta_auroc_mean = mean(delta_auroc, na.rm = TRUE),
+    delta_auroc_se = sd(delta_auroc, na.rm = TRUE) / sqrt(sum(!is.na(delta_auroc))),
+    .groups = "drop"
+  )
+
+p_robust_pert <- ggplot(df_robust_pert, aes(x = baseline_auroc_mean, y = delta_auroc_mean,
+                                             color = model, shape = dataset)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = delta_auroc_mean - delta_auroc_se,
+                    ymax = delta_auroc_mean + delta_auroc_se),
+                width = 0, linewidth = 0.4, alpha = 0.6) +
+  geom_errorbarh(aes(xmin = baseline_auroc_mean - baseline_auroc_se,
+                     xmax = baseline_auroc_mean + baseline_auroc_se),
+                 height = 0, linewidth = 0.4, alpha = 0.6) +
+  geom_point(size = 3.5) +
+  facet_wrap(~ perturbation) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_shape_manual(values = c(16, 17, 15, 3, 7, 8), name = "Dataset") +
+  labs(
+    x = "Baseline AUROC (mean across folds)",
+    y = "Mean AUROC change (pp)",
+    title = "Robustness vs. baseline performance (per perturbation)"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "horizontal") +
+  guides(color = guide_legend(nrow = 2, override.aes = list(size = 4)),
+         shape = guide_legend(nrow = 2, override.aes = list(size = 4)))
+
+ggsave(file.path(plots_path, "robustness_vs_baseline_per_perturbation.pdf"),
+       plot = p_robust_pert, width = 18, height = 8, scale=0.8)
+```
+
+```{r model-agreement, fig.width=14, fig.height=8}
+# Baseline predictions pivoted wide: one column per model
+df_wide <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  select(dataset, fold, sample_idx, model, proba_class1) %>%
+  pivot_wider(names_from = model, values_from = proba_class1)
+
+model_names <- sort(unique(df$model))
+datasets_list <- unique(df_wide$dataset)
+
+pdf(file.path(plots_path, "model_agreement.pdf"), width = 14, height = 8)
+par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+for (ds in datasets_list) {
+  mat <- df_wide %>%
+    filter(dataset == ds) %>%
+    select(all_of(model_names)) %>%
+    cor(method = "spearman", use = "pairwise.complete.obs")
+  corrplot(mat, method = "color", type = "lower", addCoef.col = "black",
+           number.cex = 0.8, tl.cex = 0.9, tl.col = "black",
+           title = ds, mar = c(0, 0, 1.5, 0),
+           cl.lim = c(-1, 1))
+}
+dev.off()
+```
+
+```{r prediction-flip-rate, fig.width=12, fig.height=6}
+# Fraction of samples whose predicted class flips (crosses 0.5) under perturbation vs baseline
+df_bl_class <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  mutate(pred_bl = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+  select(dataset, model, fold, sample_idx, pred_bl)
+
+for (selected_perturbation in perturbations) {
+
+  df_pert_class <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+")),
+           pred_pert = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+    filter(!is.na(param_numeric))
+
+  df_flip <- df_pert_class %>%
+    left_join(df_bl_class, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    mutate(flipped = pred_pert != pred_bl) %>%
+    group_by(dataset, model, param_numeric) %>%
+    summarise(flip_rate = mean(flipped, na.rm = TRUE), .groups = "drop")
+
+  # Add zero-point (no perturbation, flip_rate = 0)
+  df_zero <- df_flip %>%
+    distinct(dataset, model) %>%
+    mutate(param_numeric = 0, flip_rate = 0)
+  df_flip <- bind_rows(df_zero, df_flip)
+
+  # Convert to ordered factor for evenly spaced x-axis
+  param_levels <- sort(unique(df_flip$param_numeric))
+  df_flip <- df_flip %>%
+    mutate(param_numeric = factor(param_numeric, levels = param_levels))
+
+  p_flip <- ggplot(df_flip,
+                   aes(x = param_numeric, y = flip_rate, color = model, group = model)) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 1.5) +
+    facet_wrap(~ dataset, scales = "free_x") +
+    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_color_brewer(palette = "Dark2", name = "Model") +
+    labs(
+      x = "Perturbation level",
+      y = "Flip rate",
+      title = paste0("Prediction flip rate (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          axis.text.x = element_text(angle = 45, hjust = 1)) +
+    guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE))
+
+  ggsave(file.path(plots_path, paste0("flip_rate_", selected_perturbation, ".pdf")),
+         plot = p_flip, width = 12, height = 6)
+}
+```
+
+```{r shift-concordance, fig.width=14, fig.height=8}
+# Spearman correlation of per-sample prediction shifts between models
+# Answers: do models fail on the same samples?
+model_names <- sort(unique(df$model))
+
+df_bl_proba <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  select(dataset, model, fold, sample_idx, proba_bl = proba_class1)
+
+for (selected_perturbation in perturbations) {
+
+  # Compute per-sample shift (perturbed - baseline)
+  df_shift_wide <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    left_join(df_bl_proba, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    mutate(delta = proba_class1 - proba_bl) %>%
+    select(dataset, fold, sample_idx, param_value, model, delta) %>%
+    pivot_wider(names_from = model, values_from = delta)
+
+  datasets_pert <- unique(df_shift_wide$dataset)
+
+  pdf(file.path(plots_path,
+                paste0("shift_concordance_", selected_perturbation, ".pdf")),
+      width = 14, height = 8)
+  par(mfrow = c(2, 3), mar = c(1, 1, 2, 1))
+
+  for (ds in datasets_pert) {
+    sub <- df_shift_wide %>%
+      filter(dataset == ds) %>%
+      select(all_of(model_names))
+
+    if (nrow(sub) < 3) next
+
+    mat <- cor(sub, method = "spearman", use = "pairwise.complete.obs")
+    corrplot(mat, method = "color", type = "lower", addCoef.col = "black",
+             number.cex = 0.8, tl.cex = 0.9, tl.col = "black",
+             title = paste0(ds, " (", selected_perturbation, ")"),
+             mar = c(0, 0, 1.5, 0),
+             cl.lim = c(-1, 1))
+  }
+
+  dev.off()
+}
+```
+
+```{r shift-concordance-boxplot, fig.width=14, fig.height=8}
+# Boxplot summary of pairwise Spearman shift correlations across datasets
+# Same information as the corrplot matrices but in a single compact figure
+
+df_bl_proba_bp <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  select(dataset, model, fold, sample_idx, proba_bl = proba_class1)
+
+cor_records <- list()
+
+for (selected_perturbation in perturbations) {
+
+  df_shift_wide <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    left_join(df_bl_proba_bp, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    mutate(delta = proba_class1 - proba_bl) %>%
+    select(dataset, fold, sample_idx, param_value, model, delta) %>%
+    pivot_wider(names_from = model, values_from = delta)
+
+  # Compute correlation per param_value so we get a distribution for boxplots
+  for (ds in unique(df_shift_wide$dataset)) {
+    for (pv in unique(df_shift_wide$param_value)) {
+      sub <- df_shift_wide %>%
+        filter(dataset == ds, param_value == pv) %>%
+        select(all_of(model_names))
+
+      if (nrow(sub) < 3) next
+
+      mat <- cor(sub, method = "spearman", use = "pairwise.complete.obs")
+
+      # Extract lower triangle pairs
+      for (i in 2:ncol(mat)) {
+        for (j in 1:(i - 1)) {
+          cor_records <- c(cor_records, list(tibble(
+            perturbation = selected_perturbation,
+            dataset = ds,
+            param_value = pv,
+            model_pair = paste0(colnames(mat)[j], " vs\n", colnames(mat)[i]),
+            rho = mat[i, j]
+          )))
+        }
+      }
+    }
+  }
+}
+
+df_cor <- bind_rows(cor_records)
+
+p_cor_box <- ggplot(df_cor, aes(x = model_pair, y = rho, fill = perturbation)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_boxplot(outlier.shape = NA, alpha = 0.8, position = position_dodge(width = 0.8)) +
+  scale_fill_brewer(palette = "Set2", name = "Perturbation") +
+  scale_y_continuous(limits = c(-1, 1)) +
+  labs(
+    x = "Model pair",
+    y = "Spearman correlation of per-sample prediction shifts",
+    title = "Shift concordance across datasets (do models fail on the same samples?)"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE))
+
+ggsave(file.path(plots_path, "shift_concordance_boxplot.pdf"),
+       plot = p_cor_box, width = 14, height = 8)
+
+# One plot per dataset
+for (ds in unique(df_cor$dataset)) {
+  df_cor_ds <- df_cor %>% filter(dataset == ds)
+
+  p_cor_box_ds <- ggplot(df_cor_ds, aes(x = model_pair, y = rho, fill = perturbation)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+    geom_boxplot(outlier.shape = NA, alpha = 0.8, position = position_dodge(width = 0.8)) +
+    scale_fill_brewer(palette = "Set2", name = "Perturbation") +
+    scale_y_continuous(limits = c(-1, 1)) +
+    labs(
+      x = "Model pair",
+      y = "Spearman correlation of per-sample prediction shifts",
+      title = paste0("Shift concordance (", ds, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          axis.text.x = element_text(angle = 45, hjust = 1)) +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE))
+
+  ggsave(file.path(plots_path, paste0("shift_concordance_boxplot_", ds, ".pdf")),
+         plot = p_cor_box_ds, width = 14, height = 8)
+}
+```
+
+```{r flip-asymmetry, fig.width=12, fig.height=8}
+# Class-conditional flip asymmetry: 1->0 vs 0->1 flips
+df_bl_class <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  mutate(pred_bl = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+  select(dataset, model, fold, sample_idx, pred_bl)
+
+for (selected_perturbation in perturbations) {
+
+  df_pert_class <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+")),
+           pred_pert = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+    filter(!is.na(param_numeric))
+
+  df_asym <- df_pert_class %>%
+    left_join(df_bl_class, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    filter(pred_pert != pred_bl) %>%
+    mutate(direction = ifelse(pred_bl == 1 & pred_pert == 0, "1 \u2192 0", "0 \u2192 1")) %>%
+    group_by(dataset, model, param_numeric, direction) %>%
+    summarise(n_flips = n(), .groups = "drop")
+
+  # Get total samples per group for rate calculation
+  df_total <- df_pert_class %>%
+    left_join(df_bl_class, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    group_by(dataset, model, param_numeric) %>%
+    summarise(n_total = n(), .groups = "drop")
+
+  df_asym <- df_asym %>%
+    left_join(df_total, by = c("dataset", "model", "param_numeric")) %>%
+    mutate(flip_rate = n_flips / n_total)
+
+  # Add zero-point (no perturbation, flip_rate = 0) for both directions
+  directions <- unique(df_asym$direction)
+  df_zero <- expand.grid(
+    dataset = unique(df_asym$dataset),
+    model = unique(df_asym$model),
+    direction = directions,
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(param_numeric = 0, flip_rate = 0, n_flips = 0, n_total = NA)
+  df_asym <- bind_rows(df_zero, df_asym)
+
+  # Convert to ordered factor for evenly spaced x-axis
+  param_levels <- sort(unique(df_asym$param_numeric))
+  df_asym <- df_asym %>%
+    mutate(param_numeric = factor(param_numeric, levels = param_levels))
+
+  p_asym <- ggplot(df_asym,
+                   aes(x = param_numeric, y = flip_rate,
+                       color = model, linetype = direction,
+                       group = interaction(model, direction))) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 1.5) +
+    facet_wrap(~ dataset, scales = "free_x") +
+    scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+    scale_color_brewer(palette = "Dark2", name = "Model") +
+    scale_linetype_manual(values = c("1 \u2192 0" = "solid", "0 \u2192 1" = "dashed"),
+                          name = "Flip direction") +
+    labs(
+      x = "Perturbation level",
+      y = "Flip rate",
+      title = paste0("Class-conditional flip asymmetry (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          axis.text.x = element_text(angle = 45, hjust = 1)) +
+    guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE),
+           linetype = guide_legend(nrow = 1))
+
+  ggsave(file.path(plots_path, paste0("flip_asymmetry_", selected_perturbation, ".pdf")),
+         plot = p_asym, width = 12, height = 8)
+}
+```
+
+```{r confidence-erosion, fig.width=12, fig.height=6}
+# Mean prediction confidence |p - 0.5| vs perturbation level
+df_bl_conf <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  mutate(confidence = abs(proba_class1 - 0.5)) %>%
+  group_by(dataset, model) %>%
+  summarise(mean_conf = mean(confidence, na.rm = TRUE), .groups = "drop") %>%
+  mutate(param_numeric = 0, source = "baseline")
+
+for (selected_perturbation in perturbations) {
+
+  df_pert_conf <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+")),
+           confidence = abs(proba_class1 - 0.5)) %>%
+    filter(!is.na(param_numeric)) %>%
+    group_by(dataset, model, param_numeric) %>%
+    summarise(mean_conf = mean(confidence, na.rm = TRUE), .groups = "drop") %>%
+    mutate(source = "perturbed")
+
+  df_conf <- bind_rows(df_bl_conf, df_pert_conf)
+
+  p_conf <- ggplot(df_conf,
+                   aes(x = param_numeric, y = mean_conf, color = model)) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 1.5) +
+    facet_wrap(~ dataset, scales = "free_x") +
+    scale_y_continuous(limits = c(0, 0.5)) +
+    scale_color_brewer(palette = "Dark2", name = "Model") +
+    labs(
+      x = "Perturbation level",
+      y = "Mean confidence |p - 0.5|",
+      title = paste0("Confidence erosion (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal",
+          axis.text.x = element_text(angle = 45, hjust = 1)) +
+    guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE))
+
+  ggsave(file.path(plots_path, paste0("confidence_erosion_", selected_perturbation, ".pdf")),
+         plot = p_conf, width = 12, height = 6)
+}
+```
+
+```{r robustness-audc, fig.width=12, fig.height=6}
+# Area Under the Degradation Curve (AUDC) — single robustness score per model × dataset × perturbation
+metric_baseline <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  group_by(dataset, model, fold) %>%
+  summarise(auroc_bl = compute_auroc(y_true, proba_class1), .groups = "drop")
+
+audc_all <- list()
+
+for (selected_perturbation in perturbations) {
+
+  metric_pert <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+"))) %>%
+    filter(!is.na(param_numeric)) %>%
+    group_by(dataset, model, fold, param_numeric) %>%
+    summarise(auroc_pert = compute_auroc(y_true, proba_class1), .groups = "drop")
+
+  # Delta AUROC per fold, then mean across folds
+  df_delta <- metric_pert %>%
+    left_join(metric_baseline, by = c("dataset", "model", "fold")) %>%
+    mutate(delta = (auroc_pert - auroc_bl) * 100) %>%
+    group_by(dataset, model, param_numeric) %>%
+    summarise(delta_mean = mean(delta, na.rm = TRUE), .groups = "drop")
+
+  # AUDC: trapezoidal integration of delta curve over normalised perturbation levels
+  df_audc <- df_delta %>%
+    arrange(dataset, model, param_numeric) %>%
+    group_by(dataset, model) %>%
+    summarise(
+      audc = {
+        x <- param_numeric
+        y <- delta_mean
+        if (length(x) < 2) NA_real_
+        else {
+          x_norm <- (x - min(x)) / (max(x) - min(x))
+          sum(diff(x_norm) * (y[-length(y)] + y[-1]) / 2)
+        }
+      },
+      .groups = "drop"
+    ) %>%
+    mutate(perturbation = selected_perturbation)
+
+  audc_all <- c(audc_all, list(df_audc))
+}
+
+df_audc_all <- bind_rows(audc_all)
+
+p_audc <- ggplot(df_audc_all,
+                 aes(x = model, y = audc, fill = perturbation)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  facet_wrap(~ dataset) +
+  scale_fill_brewer(palette = "Set2", name = "Perturbation") +
+  labs(
+    x = "Model",
+    y = "AUDC (pp, lower = more degradation)",
+    title = "Robustness summary: Area Under the Degradation Curve (AUROC)"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave(file.path(plots_path, "robustness_audc.pdf"),
+       plot = p_audc, width = 12, height = 6)
+```
+
+```{r sample-vulnerability, fig.width=12, fig.height=6}
+# Per-sample vulnerability: across how many perturbation levels does a sample flip?
+df_bl_class <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  mutate(pred_bl = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+  select(dataset, model, fold, sample_idx, pred_bl)
+
+for (selected_perturbation in perturbations) {
+
+  df_pert_class <- df %>%
+    filter(perturbation == selected_perturbation, param_value != "baseline") %>%
+    mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+")),
+           pred_pert = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+    filter(!is.na(param_numeric))
+
+  n_levels <- length(unique(df_pert_class$param_numeric))
+
+  df_vuln <- df_pert_class %>%
+    left_join(df_bl_class, by = c("dataset", "model", "fold", "sample_idx")) %>%
+    mutate(flipped = pred_pert != pred_bl) %>%
+    group_by(dataset, model, fold, sample_idx) %>%
+    summarise(n_flips = sum(flipped), .groups = "drop")
+
+  p_vuln <- ggplot(df_vuln,
+                   aes(x = n_flips, fill = model)) +
+    geom_histogram(binwidth = 1, position = "dodge", color = "white") +
+    facet_wrap(~ dataset, scales = "free_y") +
+    scale_x_continuous(breaks = 0:n_levels) +
+    scale_fill_brewer(palette = "Dark2", name = "Model") +
+    labs(
+      x = paste0("Number of perturbation levels where sample flips (out of ", n_levels, ")"),
+      y = "Number of samples",
+      title = paste0("Sample vulnerability distribution (", selected_perturbation, ")")
+    ) +
+    theme_bw(base_size = 13) +
+    theme(legend.position = "bottom",
+          legend.direction = "horizontal") +
+    guides(fill = guide_legend(nrow = 1, byrow = TRUE))
+
+  ggsave(file.path(plots_path, paste0("sample_vulnerability_", selected_perturbation, ".pdf")),
+         plot = p_vuln, width = 12, height = 6)
+}
+```
+
+# Final figures
+
+## 1. AUROC Degradation
+
+```{r auroc-degradation-boxplot, fig.width=14, fig.height=8}
+# Compact boxplot: delta AUROC across perturbation levels per model × dataset × perturbation
+# One figure combining all 3 perturbation types
+
+metric_fn <- compute_auroc
+
+# Baseline AUROC per model × dataset × fold
+auroc_baseline <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  group_by(dataset, model, fold) %>%
+  summarise(val_baseline = metric_fn(y_true, proba_class1), .groups = "drop")
+
+# Perturbed AUROC per model × dataset × perturbation × param_value × fold
+auroc_pert <- df %>%
+  filter(perturbation != "baseline", !is.na(perturbation), param_value != "baseline") %>%
+  mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+"))) %>%
+  filter(!is.na(param_numeric)) %>%
+  group_by(dataset, model, perturbation, param_numeric, fold) %>%
+  summarise(val_pert = metric_fn(y_true, proba_class1), .groups = "drop")
+
+# Delta AUROC (pp) per fold × perturbation level
+df_delta_all <- auroc_pert %>%
+  left_join(auroc_baseline, by = c("dataset", "model", "fold")) %>%
+  filter(!is.na(val_baseline), !is.na(val_pert)) %>%
+  mutate(delta = (val_pert - val_baseline) * 100)
+
+# Bar plot with error bars: mean ± SE of delta AUROC
+df_delta_bar <- df_delta_all %>%
+  group_by(dataset, model, perturbation) %>%
+  summarise(
+    delta_mean = mean(delta, na.rm = TRUE),
+    delta_se = sd(delta, na.rm = TRUE) / sqrt(sum(!is.na(delta))),
+    .groups = "drop"
+  )
+
+# Sort models by overall mean delta (least degradation first)
+model_order <- df_delta_bar %>%
+  group_by(model) %>%
+  summarise(overall_mean = mean(delta_mean, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(overall_mean)) %>%
+  pull(model)
+df_delta_bar <- df_delta_bar %>%
+  mutate(model = factor(model, levels = model_order))
+
+# Significance: flag model × dataset × perturbation where any param_value is significant
+df_sig <- stats_df %>%
+  mutate(significant = as.logical(significant) | tolower(as.character(significant)) == "true") %>%
+  group_by(dataset, model, perturbation) %>%
+  summarise(any_sig = any(significant, na.rm = TRUE), .groups = "drop") %>%
+  filter(any_sig)
+
+# Merge significance with bar data for asterisk placement
+df_delta_bar <- df_delta_bar %>%
+  left_join(df_sig, by = c("dataset", "model", "perturbation")) %>%
+  mutate(any_sig = replace_na(any_sig, FALSE),
+         label = ifelse(any_sig, "*", ""),
+         model = factor(model, levels = model_order))
+
+p_auroc_bar <- ggplot(df_delta_bar, aes(x = model, y = delta_mean, fill = perturbation)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7, alpha = 0.8) +
+  geom_errorbar(aes(ymin = delta_mean - delta_se, ymax = delta_mean + delta_se),
+                position = position_dodge(width = 0.8), width = 0.2, linewidth = 0.3) +
+  geom_text(aes(y = ifelse(delta_mean < 0, delta_mean - delta_se - 3, delta_mean + delta_se + 3),
+                label = label),
+            position = position_dodge(width = 0.8), size = 4, color = "firebrick", vjust = 0.5, show.legend = FALSE) +
+  facet_wrap(~ dataset, ncol = 3) +
+  scale_fill_brewer(palette = "Set2", name = "Perturbation") +
+  scale_y_continuous(breaks = seq(-30, 30, by = 10), labels = function(x) paste0(x, " pp")) +
+  labs(
+    x = "Model",
+    y = expression(Delta * "AUROC (pp, mean" %+-% "SE)"),
+    # title = "AUROC degradation under perturbation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(size = 11)) +
+  guides(fill = guide_legend(nrow = 1, byrow = TRUE))
+
+ggsave(
+  filename = file.path(plots_path, "paper", "auroc_degradation_barplot.pdf"),
+  plot = p_auroc_bar,
+  width = 15,
+  height = 10,
+  units = "in",
+  scale = 0.6,
+  limitsize = FALSE
+)
+
+ggsave(file.path(plots_path, "png", "auroc_degradation_barplot.png"),
+       plot = p_auroc_bar, width = 14, height = 8, scale=0.8)
+```
+
+```{r auroc-degradation-smooth, fig.width=14, fig.height=10}
+# Smooth line version: color = model, linetype = perturbation, faceted by dataset
+# Normalise x per perturbation so different scales are comparable
+
+# Average delta across folds first, then add zero-point
+df_delta_mean <- df_delta_all %>%
+  group_by(dataset, model, perturbation, param_numeric) %>%
+  summarise(delta = mean(delta, na.rm = TRUE), .groups = "drop")
+
+# Add zero-point
+df_delta_zero <- df_delta_mean %>%
+  distinct(dataset, model, perturbation) %>%
+  mutate(param_numeric = 0, delta = 0)
+df_delta_mean <- bind_rows(df_delta_zero, df_delta_mean)
+
+# Normalise x per perturbation
+df_delta_norm <- df_delta_mean %>%
+  group_by(perturbation) %>%
+  mutate(param_norm = (param_numeric - min(param_numeric)) /
+           (max(param_numeric) - min(param_numeric))) %>%
+  ungroup() %>%
+  mutate(param_norm = replace_na(param_norm, 0))
+
+p_auroc <- ggplot(df_delta_norm,
+                         aes(x = param_norm, y = delta,
+                             color = model, linetype = perturbation,
+                             group = interaction(model, perturbation))) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.2) +
+  facet_wrap(~ dataset, ncol = 3) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_linetype_manual(values = c("Feature Removal" = "solid",
+                                   "Zero Inflation" = "dashed",
+                                   "Zero Imputation" = "dotted"),
+                        name = "Perturbation") +
+  scale_y_continuous(labels = function(x) paste0(x, " pp")) +
+  labs(
+    x = "Normalised perturbation intensity (0 = none, 1 = max)",
+    y = expression(Delta * "AUROC (pp)"),
+    title = "AUROC degradation under perturbation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        legend.spacing.y = unit(0, "pt"),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(0, 0, 0, 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 11)) +
+  guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE),
+         linetype = guide_legend(nrow = 1, byrow = TRUE))
+
+ggsave(file.path(plots_path, "auroc_degradation.pdf"),
+       plot = p_auroc, width = 14, height = 10, scale = 0.8)
+```
+
+## 2. Robustness vs Baseline per perturbation
+
+```{r}
+df_robust_pert <- metrics_df %>%
+  mutate(delta_auroc = (auroc - baseline_auroc) * 100) %>%
+  group_by(dataset, model, perturbation) %>%
+  summarise(
+    baseline_auroc_mean = mean(baseline_auroc, na.rm = TRUE),
+    baseline_auroc_se = sd(baseline_auroc, na.rm = TRUE) / sqrt(sum(!is.na(baseline_auroc))),
+    delta_auroc_mean = mean(delta_auroc, na.rm = TRUE),
+    delta_auroc_se = sd(delta_auroc, na.rm = TRUE) / sqrt(sum(!is.na(delta_auroc))),
+    .groups = "drop"
+  )
+
+p_robust_pert <- ggplot(df_robust_pert, aes(x = baseline_auroc_mean, y = delta_auroc_mean,
+                                             color = model, shape = dataset)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = delta_auroc_mean - delta_auroc_se,
+                    ymax = delta_auroc_mean + delta_auroc_se),
+                width = 0, linewidth = 0.4, alpha = 0.6) +
+  geom_errorbarh(aes(xmin = baseline_auroc_mean - baseline_auroc_se,
+                     xmax = baseline_auroc_mean + baseline_auroc_se),
+                 height = 0, linewidth = 0.4, alpha = 0.6) +
+  geom_point(size = 3.5) +
+  facet_wrap(~ perturbation) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_shape_manual(values = c(16, 17, 15, 3, 7, 8), name = "Dataset") +
+  labs(
+    x = "Baseline AUROC (mean across folds)",
+    y = "Mean AUROC change (pp)",
+    # title = "Robustness vs. baseline performance"
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "horizontal") +
+  guides(color = guide_legend(nrow = 3, override.aes = list(size = 4)),
+         shape = guide_legend(nrow = 3, override.aes = list(size = 4)))
+
+
+ggsave(
+  filename = file.path(plots_path, "paper", "robustness_vs_baseline_per_perturbation.pdf"),
+  plot = p_robust_pert,
+  width = 16,
+  height = 7,
+  units = "in",
+  scale = 0.6,
+  limitsize = FALSE
+)
+
+ggsave(file.path(plots_path, "png", "robustness_vs_baseline_per_perturbation.png"),
+       plot = p_robust_pert, width = 18, height = 8, scale=0.8)
+```
+
+## 3. Flip rates
+
+```{r flip-rate-grid, fig.width=18, fig.height=10}
+# facet_grid(perturbation ~ dataset): lines showing flip rate progression
+# All 3 perturbations × 6 datasets in one figure
+
+df_bl_class_all <- df %>%
+  filter(param_value == "baseline") %>%
+  distinct(dataset, model, fold, sample_idx, .keep_all = TRUE) %>%
+  mutate(pred_bl = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+  select(dataset, model, fold, sample_idx, pred_bl)
+
+df_pert_class_all <- df %>%
+  filter(perturbation != "baseline", !is.na(perturbation), param_value != "baseline") %>%
+  mutate(param_numeric = as.numeric(str_extract(param_value, "[\\d.]+")),
+         pred_pert = ifelse(proba_class1 >= 0.5, 1, 0)) %>%
+  filter(!is.na(param_numeric))
+
+# Flip rate per model × dataset × perturbation × param_value
+df_flip_all <- df_pert_class_all %>%
+  left_join(df_bl_class_all, by = c("dataset", "model", "fold", "sample_idx")) %>%
+  mutate(flipped = pred_pert != pred_bl) %>%
+  group_by(dataset, model, perturbation, param_numeric) %>%
+  summarise(flip_rate = mean(flipped, na.rm = TRUE), .groups = "drop")
+
+# Add zero-point (no perturbation, flip_rate = 0)
+df_zero_all <- df_flip_all %>%
+  distinct(dataset, model, perturbation) %>%
+  mutate(param_numeric = 0, flip_rate = 0)
+df_flip_all <- bind_rows(df_zero_all, df_flip_all)
+
+# Convert to ordered factor per perturbation for evenly spaced x-axis
+df_flip_all <- df_flip_all %>%
+  group_by(perturbation) %>%
+  mutate(param_factor = factor(param_numeric, levels = sort(unique(param_numeric)))) %>%
+  ungroup()
+
+p_flip_grid <- ggplot(df_flip_all,
+                      aes(x = param_factor, y = flip_rate, color = model, group = model)) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.2) +
+  facet_grid(dataset ~ perturbation, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  labs(
+    x = "Perturbation level",
+    y = "Flip rate",
+    title = "Prediction flip rate under perturbation"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        strip.text = element_text(size = 9)) +
+  guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE))
+
+ggsave(file.path(plots_path, "flip_rate_grid.pdf"),
+       plot = p_flip_grid, width = 10, height = 18, scale = 0.8)
+```
+
+```{r flip-rate-combined, fig.width=14, fig.height=10}
+# Per-dataset facets, color = model, linetype = perturbation
+# Normalize x-axis to [0, 1] per perturbation so different scales are comparable
+
+df_flip_norm <- df_flip_all %>%
+  group_by(perturbation) %>%
+  mutate(param_norm = (param_numeric - min(param_numeric)) /
+           (max(param_numeric) - min(param_numeric))) %>%
+  ungroup() %>%
+  mutate(param_norm = replace_na(param_norm, 0))
+
+p_flip_combined <- ggplot(df_flip_norm,
+                          aes(x = param_norm, y = flip_rate,
+                              color = model, linetype = perturbation,
+                              group = interaction(model, perturbation))) +
+  geom_line(linewidth = 0.5) +
+  geom_point(size = 0.8) +
+  facet_wrap(~ dataset, ncol = 3) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_color_brewer(palette = "Dark2", name = "Model") +
+  scale_linetype_manual(values = c("Feature Removal" = "solid",
+                                   "Zero Inflation" = "dashed",
+                                   "Zero Imputation" = "dotted"),
+                        name = "Perturbation") +
+  labs(
+    x = "Normalised perturbation intensity (0 = none, 1 = max)",
+    y = "Flip rate",
+    #title = "Prediction flip rate under perturbation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "vertical",
+        legend.spacing.y = unit(0, "pt"),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(0, 0, 0, 0),
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 11)) +
+  guides(color = guide_legend(override.aes = list(size = 4), nrow = 1, byrow = TRUE),
+         linetype = guide_legend(nrow = 1, byrow = TRUE))
+
+ggsave(
+  filename = file.path(plots_path, "paper", "flip_rate_combined.pdf"),
+  plot = p_flip_combined,
+  width = 15,
+  height = 10,
+  units = "in",
+  scale = 0.6,
+  limitsize = FALSE
+)
+
+ggsave(file.path(plots_path, "png", "flip_rate_combined.png"),
+       plot = p_flip_combined, width = 14, height = 10, scale = 0.8)
+```
+
+## 4. Shift concordance
+
+```{r shift-concordance-heatmap, fig.width=14, fig.height=10}
+# Option A: Heatmap — mean rho per model pair × dataset, faceted by perturbation
+# Clean model pair labels (remove newline used for boxplot x-axis)
+df_cor_mean <- df_cor %>%
+  mutate(model_pair = str_replace(model_pair, "\n", " ")) %>%
+  group_by(perturbation, dataset, model_pair) %>%
+  summarise(mean_rho = mean(rho, na.rm = TRUE), .groups = "drop")
+
+p_cor_heat <- ggplot(df_cor_mean, aes(x = dataset, y = model_pair, fill = mean_rho)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", mean_rho)), size = 3) +
+  facet_wrap(~ perturbation, ncol = 3) +
+  scale_fill_gradient2(low = "#2166AC", mid = "white", high = "#B2182B",
+                       midpoint = 0, limits = c(-1, 1),
+                       name = "Mean Spearman rho") +
+  labs(
+    x = "Dataset",
+    y = "Model pair",
+    title = "Pairwise shift concordance across datasets and perturbations"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+        strip.text = element_text(size = 11))
+
+ggsave(file.path(plots_path, "shift_concordance_heatmap.pdf"),
+       plot = p_cor_heat, width = 14, height = 10)
+```
+
+```{r shift-concordance-dotplot, fig.width=18, fig.height=6}
+# Violin + jittered points, ordered by median correlation, facets in single row
+df_cor_violin <- df_cor %>%
+  mutate(model_pair = str_replace(model_pair, "\n", " "))
+
+# Order model pairs by median rho (strongest first)
+pair_order <- df_cor_violin %>%
+  group_by(model_pair) %>%
+  summarise(med_rho = median(rho, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(med_rho)) %>%
+  pull(model_pair)
+df_cor_violin <- df_cor_violin %>%
+  mutate(model_pair = factor(model_pair, levels = pair_order))
+
+# Bold the whole label only for TFM vs TFM pairs (RF and XGBoost are baselines)
+tfm_models <- c("ContextTab", "TabDPT", "TabICL", "TabPFN")
+bold_tfm_labels <- function(x) {
+  vapply(as.character(x), function(lbl) {
+    parts <- str_split(lbl, " vs ")[[1]]
+    if (all(parts %in% tfm_models)) paste0("**", lbl, "**") else lbl
+  }, character(1), USE.NAMES = FALSE)
+}
+
+p_cor_dot <- ggplot(df_cor_violin, aes(x = model_pair, y = rho)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_violin(color = "grey50", alpha = 0.6, scale = "width", linewidth=0.5) +
+  geom_jitter(aes(color = dataset), width = 0.15, size = 0.3, alpha = 0.7) +
+  facet_wrap(perturbation ~., ncol = 1) +
+  scale_color_brewer(palette = "Dark2", name = "Dataset") +
+  scale_x_discrete(labels = bold_tfm_labels) +
+  scale_y_continuous(breaks = seq(-0.5, 1, by = 0.25), limits = c(-0.5, 1)) +
+  labs(
+    x = NULL,
+    y = "Prediction shift correlation",
+    #title = "Pairwise shift concordance under perturbation"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.spacing.y = unit(-2, "pt"),
+        legend.margin = margin(0, 0, 0, 0),
+        legend.box.margin = margin(8, 0, 0, 0),
+        legend.box.spacing = unit(10, "pt"),
+        legend.key.height = unit(10, "pt"),
+        axis.text.x = element_markdown(angle = 45, hjust = 1, size = 8),
+        strip.text = element_text(size = 11)) +
+  guides(color = guide_legend(nrow = 3, override.aes = list(size = 3)))
+
+
+ggsave(
+  filename = file.path(plots_path, "paper", "shift_concordance_dotplot.pdf"),
+  plot = p_cor_dot,
+  width = 11,
+  height = 13,
+  units = "in",
+  scale = 0.7,
+  limitsize = FALSE
+)
+
+
+ggsave(file.path(plots_path, "png", "shift_concordance_dotplot.png"),
+       plot = p_cor_dot, width = 10, height = 12, scale=0.8)
+```
