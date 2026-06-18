@@ -2,10 +2,9 @@
 
 > **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
 
-**Author of the code:** Giulia Perciballi\
-**Authors of the paper:** Giulia Perciballi, Ahmad Fall, Federica Granese, Edi Prifti and Jean-Daniel Zucker\
+**Authors:** Giulia Perciballi, Ahmad Fall, Federica Granese, Edi Prifti and Jean-Daniel Zucker\
 **Date:** June 2026\
-**Affiliation:** UMMISCO
+**Affiliation:** IRD, Sorbonne Université, Unité de Modélisation Mathématique et Informatique des Systèmes Complexes (UMMISCO)
 
 Pipeline for evaluating TFM robustness on microbiome compositional data
 under controlled perturbations.
@@ -36,14 +35,27 @@ benchmark_results_new_final/      # Output of benchmarking
 ---
 
 ## Installation
-```python
+
+Requires [pip](https://pip.pypa.io/) (used to install [uv](https://docs.astral.sh/uv/),
+which manages the environment and dependencies).
+
+```bash
 git clone https://github.com/UMMISCO/metagenomics-fm/
 cd metagenomics-fm
+
+# Install uv
 pip install uv
+
+# Create the virtual environment with Python 3.12.2
 uv venv --python 3.12.2
+
+# Activate the environment
 source .venv/bin/activate
+
+# Install dependencies
 uv sync
 ```
+
 ---
 
 ## Datasets
