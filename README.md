@@ -2,7 +2,6 @@
 
 > **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
 
-**Author of the code:** Giulia Perciballi\
 **Authors:** Giulia Perciballi, Ahmad Fall, Federica Granese, Edi Prifti and Jean-Daniel Zucker\
 **Date:** June 2026\
 **Affiliation:** IRD, Sorbonne Université, Unité de Modélisation Mathématique et Informatique des Systèmes Complexes (UMMISCO)
@@ -284,27 +283,10 @@ columns: dataset, model, perturbation, param_value,
 
 ---
 
-## Dependencies
-
-```
-scikit-learn    # RF, ANOVA selection, CV
-xgboost         # XGBoost
-tabpfn          # TabPFN v2          
-tabicl          # TabICL             
-tabdpt          # TabDPT            
-sap_rpt_oss     # ContextTab        
-pandas
-pyarrow         
-scipy           
-MLstatkit       # DeLong test
-```
-
----
-
 ## Reproducibility
 
 All scripts use seed 42.
 
 ## Funding
 
-ANR DeepIntegrOmics (ANR-21-CF45-0030)
+This study was supported by the ANR-21-CF45-0030 DeepIntegromics funding from the French National Research Agency (ANR).
