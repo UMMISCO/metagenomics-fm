@@ -289,4 +289,4 @@ All scripts use seed 42.
 
 ## Funding
 
-This study was supported by the ANR-21-CF45-0030 DeepIntegromics funding from the French National Research Agency (ANR).
+This work was supported by a grant from the French Agence Nationale de la Recherche (ANR) for the DeepIntegrOmics project (number ANR-21-CE45-0030).
