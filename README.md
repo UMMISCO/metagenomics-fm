@@ -2,6 +2,7 @@
 
 > **Accepted paper - [ECML PKDD 2026], Applied Data Science track.** 
 
+**Author of the code:** Giulia Perciballi\
 **Authors:** Giulia Perciballi, Ahmad Fall, Federica Granese, Edi Prifti and Jean-Daniel Zucker\
 **Date:** June 2026\
 **Affiliation:** IRD, Sorbonne Université, Unité de Modélisation Mathématique et Informatique des Systèmes Complexes (UMMISCO)
